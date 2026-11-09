@@ -1,0 +1,19 @@
+{
+  "checked_on": "2026-11-09",
+  "accuracy": "not_established",
+  "providers": {
+    "github": {"samples": 2, "state": "blocked", "observation": "注册页面 HTTP 403"},
+    "pinterest": {"samples": 2, "state": "blocked", "observation": "资源查询 HTTP 403"},
+    "spotify": {"samples": 2, "state": "connection_failed", "observation": "当前环境的 TLS 连接失败"},
+    "mozilla": {"samples": 2, "state": "unknown", "observation": "HTTP 406，响应正文为空"},
+    "wordpress": {"samples": 2, "state": "not_detected", "observation": "账户查询返回 unknown_user"},
+    "gravatar": {"samples": 2, "state": "not_detected", "observation": "默认显示等级的公开头像 HTTP 404；注册状态未知"},
+    "duolingo": {"samples": 2, "state": "not_detected", "observation": "当前邮箱查询返回空用户列表；注册状态未知"},
+    "replit": {"samples": 2, "state": "blocked", "observation": "账户查询 HTTP 403"},
+    "imgur": {"samples": 2, "state": "blocked", "observation": "HTTP 412，未通过安全检查"},
+    "lastfm": {"samples": 2, "state": "blocked", "observation": "HTTP 200 的注册页面包含浏览器安全挑战"},
+    "freelancer": {"samples": 2, "state": "blocked", "observation": "用户字段检查 HTTP 403"},
+    "cnblogs": {"samples": 2, "state": "not_detected", "observation": "邮箱字段校验返回 true，接口表示可用于注册"},
+    "jd": {"samples": 2, "state": "blocked", "observation": "HTTP 200、resultCode 608，要求有效验证码"}
+  }
+}

@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kudo-agent"
+version = "0.1.0"
+description = "KudoAgent: public footprint research with verifiable evidence"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+dependencies = [
+  "beautifulsoup4>=4.13,<5",
+  "email-validator>=2.2,<3",
+  "filelock>=3.18,<4",
+  "httpx[socks]>=0.28,<1",
+  "langchain-core>=1,<2",
+  "langgraph>=1,<2",
+  "langgraph-checkpoint-sqlite>=3,<4",
+  "mcp>=2,<3",
+  "openai>=2,<3",
+  "phonenumbers>=9,<10",
+  "platformdirs>=4,<5",
+  "pydantic>=2.11,<3",
+  "python-dotenv>=1.1,<2",
+  "rich>=14,<15",
+  "socid-extractor>=0.0.27,<1",
+  "starlette>=1.10,<2",
+  "typer>=0.16,<1",
+  "uvicorn>=0.54,<1",
+]
+
+[project.scripts]
+kudo = "kudo_agent.integrations.cli:main"
+kudo-mcp = "kudo_agent.integrations.mcp:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.12,<1", "build>=1.2,<2", "playwright>=1.55,<2"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kudo_agent"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "--basetemp=.runtime/tests"
+markers = ["live: 需要真实网络与本地验收配置"]
+cache_dir = ".runtime/pytest-cache"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

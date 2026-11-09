@@ -1,0 +1,16 @@
+{
+  "goal": "核查 Sherlock 项目在 GitHub 的公开主页，引用资料说明发现和关联。",
+  "identifiers": [
+    {"kind": "profile", "value": "https://github.com/sherlock-project"}
+  ],
+  "budget": {
+    "concurrency": 10,
+    "per_domain": 2,
+    "request_timeout": 20,
+    "run_timeout": 7200,
+    "max_rounds": 12,
+    "max_requests": 50000,
+    "max_depth": 0,
+    "max_response_bytes": 4000000
+  }
+}

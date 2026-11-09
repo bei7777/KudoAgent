@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "kudo": {
+      "command": "kudo-mcp",
+      "env": {
+        "KUDO_ENV_FILE": "/absolute/path/to/kudo-agent/.env"
+      }
+    }
+  }
+}

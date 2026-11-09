@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "sources": [
+    {
+      "repository": "https://github.com/soxoj/maigret",
+      "commit": "21577cf7730ddaad0f17d7797e6dbf4642411b50",
+      "license": "MIT",
+      "files": ["maigret/sites.py", "maigret/utils.py", "maigret/checking.py", "maigret/error_detection.py", "maigret/errors.py", "maigret/resources/data.json"],
+      "adaptations": "选取站点与引擎合并、URL 模板识别、用户名检查、错误识别和页面检测逻辑；网络请求独立管理；增加冲突状态；数据文件保留固定提交原文。"
+    },
+    {
+      "repository": "https://github.com/sherlock-project/sherlock",
+      "commit": "c588d7c8b476df9f9c84912a05d1430fb8cdcdae",
+      "license": "MIT",
+      "files": ["sherlock_project/sherlock.py", "sherlock_project/resources/data.json"],
+      "adaptations": "复用 interpolate_string 和页面存在性判断；请求执行、用户名验证和状态映射由共用模块管理；数据文件保留固定提交原文。"
+    }
+  ]
+}

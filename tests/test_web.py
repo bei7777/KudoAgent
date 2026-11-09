@@ -1,0 +1,79 @@
+from starlette.testclient import TestClient
+
+from kudo_agent.application.config import Settings
+from kudo_agent.integrations.web import create_web_app
+
+
+def test_web_assets_and_real_capabilities(tmp_path):
+    with TestClient(create_web_app(Settings(data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
+        page = client.get("/")
+        assert page.status_code == 200
+        assert "KudoAgent" in page.text
+        assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
+        for asset in ("app.js", "app.css", "icon.svg"):
+            assert client.get(f"/static/{asset}").status_code == 200
+        data = client.get("/api/bootstrap").json()
+        assert data["model_configured"] is False
+        assert "api_key" not in data
+        assert len(data["capabilities"]["email"]["providers"]) == 13
+        assert client.get("/api/research").json()["items"] == []
+        sites = client.get("/api/capabilities?query=GitHub").json()["sites"]
+        assert any(site["name"] == "GitHub" for site in sites)
+
+
+def test_web_full_catalog_chinese_search_and_paging(tmp_path):
+    with TestClient(create_web_app(Settings(data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
+        first = client.get("/api/capabilities?limit=30").json()
+        second = client.get("/api/capabilities?offset=30&limit=30").json()
+        assert first["total_sites"] == second["total_sites"] == 9011
+        assert len(first["sites"]) == len(second["sites"]) == 30
+        assert not {site["site_id"] for site in first["sites"]} & {site["site_id"] for site in second["sites"]}
+        domestic = client.get("/api/capabilities?region=CN&limit=100").json()
+        assert domestic["total_sites"] == first["cn_sites"] > 30
+        assert all(site["region"] == "CN" for site in domestic["sites"])
+        zhihu = client.get("/api/capabilities", params={"query": "知乎", "region": "CN"}).json()
+        assert zhihu["sites"][0]["name"] == "Zhihu"
+        assert "知乎" in zhihu["sites"][0]["aliases"]
+        bilibili = client.get("/api/capabilities", params={"query": "哔哩哔哩"}).json()
+        assert bilibili["sites"][0]["supported"] is False
+        assert "UID" in bilibili["sites"][0]["rules"][0]["unsupported"]
+        assert client.get("/api/capabilities?region=invalid").status_code == 422
+        assert client.get("/api/bootstrap").json()["budget"]["max_sites"] is None
+
+
+def test_web_origin_and_session_protection(tmp_path):
+    with TestClient(create_web_app(Settings(data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
+        assert client.get("/api/bootstrap", headers={"Host": "untrusted.example"}).status_code == 400
+        assert client.get("/api/bootstrap", headers={"Origin": "https://untrusted.example"}).status_code == 403
+        assert client.get("/api/bootstrap", headers={"Sec-Fetch-Site": "cross-site"}).status_code == 403
+        assert client.post("/api/research", json={"goal": "公开资料研究"}).status_code == 403
+        token = client.get("/api/bootstrap").json()["token"]
+        client.headers["X-Kudo-Token"] = token
+        assert client.post("/api/research", content="{}").status_code == 415
+        missing = client.post("/api/research", json={"goal": "公开资料研究"})
+        assert missing.status_code == 400
+        assert "缺少模型配置" in missing.json()["error"]
+        assert client.get("/api/research").json()["total"] == 0
+
+
+def test_web_rejects_invalid_inputs_and_paths(tmp_path):
+    with TestClient(create_web_app(Settings(data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
+        token = client.get("/api/bootstrap").json()["token"]
+        client.headers["X-Kudo-Token"] = token
+        invalid = client.post("/api/research", json={"goal": "校验输入", "identifiers": [{"kind": "profile", "value": "file:///etc/passwd"}]})
+        assert invalid.status_code == 422
+        assert "file:///etc/passwd" not in invalid.text
+        assert client.get("/api/research?limit=101").status_code == 422
+        assert client.get("/api/research/not-a-run").status_code == 404
+        assert client.get("/api/research/00000000-0000-0000-0000-000000000000").status_code == 404
+        assert client.get("/static/../application/config.py").status_code == 404
+
+
+def test_web_session_expires_on_restart(tmp_path):
+    app = create_web_app(Settings(data_dir=tmp_path))
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        old = client.get("/api/bootstrap").json()["token"]
+    with TestClient(app, base_url="http://127.0.0.1") as client:
+        new = client.get("/api/bootstrap").json()["token"]
+        assert old != new
+        assert client.post("/api/research", json={"goal": "公开资料研究"}, headers={"X-Kudo-Token": old}).status_code == 403

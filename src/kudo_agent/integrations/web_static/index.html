@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="KudoAgent 本机公开足迹研究工作台">
+  <title>KudoAgent · 公开足迹研究</title>
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" type="module"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳转到主要内容</a>
+  <div class="app-frame">
+  <header class="masthead">
+    <a class="brand" href="#/tasks"><span class="brand-mark" aria-hidden="true">K</span><span>KudoAgent</span></a>
+    <nav class="main-nav" aria-label="主要导航">
+      <a href="#/tasks" data-nav="tasks">研究</a>
+      <a href="#/catalog" data-nav="catalog">站点目录</a>
+      <a href="#/compare" data-nav="compare">结果比较</a>
+      <a href="#/settings" data-nav="settings">运行设置</a>
+    </nav>
+    <span class="local-badge">本机工作空间</span>
+  </header>
+  <div class="workspace">
+    <div id="notice" class="notice" role="alert" hidden></div>
+    <main id="main" tabindex="-1"><div class="loading">正在读取研究记录…</div></main>
+  </div>
+  </div>
+</body>
+</html>
