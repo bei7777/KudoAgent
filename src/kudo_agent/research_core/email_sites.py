@@ -47,7 +47,7 @@ EMAIL_PROVIDERS = {
 
 
 def email_capabilities() -> list[dict]:
-    checks = json.loads(files("kudo_agent.research_core").joinpath("data/email-verification.json").read_text())
+    checks = json.loads(files("kudo_agent.research_core").joinpath("data/email-verification.json").read_text(encoding="utf-8"))
     if checks["providers"].keys() != EMAIL_PROVIDERS.keys():
         raise ValueError("邮箱提供方与验证记录不一致")
     return [{"site": site, **asdict(provider), "last_check": {

@@ -93,7 +93,7 @@ async def test_real_model_doctor():
 
 async def test_authorized_email_samples(store, catalog):
     sample_file = Path(os.environ["KUDO_EMAIL_SAMPLES"])
-    samples = [EmailSample.model_validate(value) for value in json.loads(sample_file.read_text())]
+    samples = [EmailSample.model_validate(value) for value in json.loads(sample_file.read_text(encoding="utf-8"))]
     assert samples
     assert {sample.site for sample in samples} <= set(EMAIL_SITES)
     for sample in samples:

@@ -26,7 +26,7 @@ async def test_killed_process_resumes(phase, tmp_path):
         "identifiers": identifiers,
         "sites": ["GitHub"], "budget": {"max_depth": 1 if phase == "planning" else 0,
                                         "max_rounds": 1 if phase == "planning" else 12},
-    }))
+    }), encoding="utf-8")
     command = [str(binary), "--data-dir", str(settings.data_dir)]
     async with Application(settings) as observer:
         with (tmp_path / "initial.log").open("wb") as log:

@@ -31,7 +31,9 @@ async def test_comparison_of_two_real_collections(store, catalog):
         finally:
             await http.close()
     comparison = compare(store, *runs)
-    (store.root / "comparison.json").write_text(json.dumps(comparison, ensure_ascii=False, indent=2))
+    (store.root / "comparison.json").write_text(
+        json.dumps(comparison, ensure_ascii=False, indent=2), encoding="utf-8",
+    )
     assert len(comparison["changes"]["not_rechecked"]) == 1
     assert comparison["changes"]["not_rechecked"][0]["previous"]["subject"] == identifiers[0].value
     assert len(comparison["changes"]["unverified"]) == 1

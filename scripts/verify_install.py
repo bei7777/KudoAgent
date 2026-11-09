@@ -22,11 +22,11 @@ async def main():
     package_path = Path(kudo_agent.__file__).resolve()
     assert "site-packages" in package_path.parts, package_path
     resource = files("kudo_agent.upstream")
-    provenance = json.loads(resource.joinpath("PROVENANCE.json").read_text())
+    provenance = json.loads(resource.joinpath("PROVENANCE.json").read_text(encoding="utf-8"))
     assert len(provenance["sources"]) == 2
     for name in ("maigret", "sherlock"):
-        assert json.loads(resource.joinpath(f"data/{name}.json").read_text())
-        assert "MIT" in resource.joinpath(f"licenses/{name}.txt").read_text()
+        assert json.loads(resource.joinpath(f"data/{name}.json").read_text(encoding="utf-8"))
+        assert "MIT" in resource.joinpath(f"licenses/{name}.txt").read_text(encoding="utf-8")
     metadata = distribution("kudo-agent")
     assert any(str(path).endswith("THIRD_PARTY_NOTICES.md") for path in metadata.files)
     with TestClient(create_web_app(Settings(data_dir=data_dir / "web")), base_url="http://127.0.0.1") as client:

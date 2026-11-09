@@ -117,9 +117,9 @@ def unsupported_reason(data: dict, origin: str) -> str:
 class Catalog:
     def __init__(self):
         resources = files("kudo_agent.upstream").joinpath("data")
-        database = json.loads(resources.joinpath("maigret.json").read_text())
+        database = json.loads(resources.joinpath("maigret.json").read_text(encoding="utf-8"))
         rules = [Rule("maigret", s.name, s.data) for s in maigret.load_sites(database)]
-        sherlock_data = json.loads(resources.joinpath("sherlock.json").read_text())
+        sherlock_data = json.loads(resources.joinpath("sherlock.json").read_text(encoding="utf-8"))
         rules += [Rule("sherlock", name, data) for name, data in sherlock_data.items() if name != "$schema"]
         groups = {}
         for rule in rules:
@@ -136,7 +136,7 @@ class Catalog:
             site.rank = min(site.rank, rank)
             site.rules.append(rule)
         self.sites = {site.site_id: site for site in groups.values()}
-        aliases = json.loads(files("kudo_agent.research_core").joinpath("data/site-aliases.json").read_text())
+        aliases = json.loads(files("kudo_agent.research_core").joinpath("data/site-aliases.json").read_text(encoding="utf-8"))
         for site in self.sites.values():
             site.aliases = sorted({alias for rule in site.rules for alias in aliases.get(rule.name, [])})
         self.version = digest([__version__, maigret.COMMIT, sherlock.COMMIT, database, sherlock_data])

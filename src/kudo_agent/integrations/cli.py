@@ -46,7 +46,7 @@ def research(
     email_site: Annotated[list[str] | None, typer.Option(help="可选的邮箱范围限制；默认全部站点")] = None,
 ):
     if request_file:
-        request = ResearchRequest.model_validate_json(request_file.read_text())
+        request = ResearchRequest.model_validate_json(request_file.read_text(encoding="utf-8"))
     else:
         identifiers = [Identifier(kind=kind, value=value) for kind, values in
                        (("username", username), ("profile", profile), ("email", email), ("phone", phone), ("ip", ip))

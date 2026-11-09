@@ -17,7 +17,7 @@ async def main():
     parser.add_argument("--sample-index", type=int, required=True)
     parser.add_argument("--data-dir", type=Path, required=True)
     args = parser.parse_args()
-    samples = json.loads(args.samples.read_text())
+    samples = json.loads(args.samples.read_text(encoding="utf-8"))
     if not 0 <= args.sample_index < len(samples):
         raise ValueError("sample-index 超出样本范围")
     sample = EmailSample.model_validate(samples[args.sample_index])
@@ -40,7 +40,9 @@ async def main():
         result = {"sample_index": args.sample_index, "site": sample.site, "run_id": run_id,
                   "state": results[0].state, "expected_presence": expected,
                   "http_statuses": [item.status_code for item in store.artifacts(run_id)]}
-        (store.run_dir(run_id) / "email-check.json").write_text(json.dumps(result, ensure_ascii=False, indent=2))
+        (store.run_dir(run_id) / "email-check.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8",
+        )
         print(json.dumps(result, ensure_ascii=False))
         if expected is not None and results[0].state != ("detected" if expected else "not_detected"):
             raise AssertionError("查询结果与已知样本情况不一致，见保存的原始资料")

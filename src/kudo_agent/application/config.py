@@ -24,7 +24,7 @@ class Settings(Model):
         if env_file is not None:
             if not env_file.is_file():
                 raise FileNotFoundError(env_file)
-            load_dotenv(env_file, override=False)
+            load_dotenv(env_file, override=False, encoding="utf-8")
         key_env = os.environ.get("KUDO_API_KEY_ENV", "KUDO_API_KEY")
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key_env):
             raise ValueError("KUDO_API_KEY_ENV 必须是有效的环境变量名称")

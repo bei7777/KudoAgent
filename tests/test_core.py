@@ -24,7 +24,7 @@ from kudo_agent.upstream.sherlock import interpolate_string
 
 
 def test_catalog_reuses_real_snapshots(catalog):
-    provenance = json.loads(files("kudo_agent.upstream").joinpath("PROVENANCE.json").read_text())
+    provenance = json.loads(files("kudo_agent.upstream").joinpath("PROVENANCE.json").read_text(encoding="utf-8"))
     assert len(provenance["sources"]) == 2
     site = catalog.select(["GitHub"], 50)[0]
     assert {rule.origin for rule in site.rules} == {"maigret", "sherlock"}
@@ -67,7 +67,7 @@ def test_request_body_encoding_and_email_scope():
 
 
 def test_engine_rules_are_inherited():
-    database = json.loads(files("kudo_agent.upstream").joinpath("data/maigret.json").read_text())
+    database = json.loads(files("kudo_agent.upstream").joinpath("data/maigret.json").read_text(encoding="utf-8"))
     sites = load_sites(database)
     site = next(site for site in sites if site.data.get("engine") == "XenForo")
     engine = database["engines"]["XenForo"]["site"]

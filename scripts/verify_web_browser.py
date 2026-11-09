@@ -238,7 +238,7 @@ async def main():
         assert not errors, errors
         result = {"first_run": first, "second_run": second, "model": "真实配置服务", "browser_errors": errors,
                   "checks": ["多行线索解析", "线索去重", "逐行格式错误", "预览不创建任务", "可选研究问题", "目录分页", "中文搜索", "国内站点筛选", "默认全部规则", "键盘表单操作", "模型连接", "研究创建", "覆盖进度", "候选资料分类", "资料搜索", "原始资料校验", "报告下载", "引用定位", "执行记录", "取消", "恢复", "比较", "320至1440像素布局"]}
-        args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2))
+        args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
         await browser.close()
         print(json.dumps(result, ensure_ascii=False), flush=True)
 
