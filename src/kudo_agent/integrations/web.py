@@ -21,6 +21,7 @@ from kudo_agent.application.config import Settings
 from kudo_agent.application.intake import ResearchIntake
 from kudo_agent.application.service import Application
 from kudo_agent.research_agent.planner import Planner
+from kudo_agent.research_core.domestic import DOMESTIC_PLATFORMS
 from kudo_agent.research_core.models import Budget, Model, ResearchRequest
 
 
@@ -106,6 +107,7 @@ async def bootstrap(request):
         "model_configured": bool(settings.model and settings.base_url and settings.api_key.get_secret_value()),
         "api_key_env": settings.api_key_env, "data_dir": str(settings.data_dir),
         "budget": Budget().model_dump(), "capabilities": app.list_capabilities(limit=50),
+        "domestic_platforms": DOMESTIC_PLATFORMS,
     })
 
 

@@ -1,8 +1,8 @@
 const $ = (selector, root = document) => root.querySelector(selector);
-const state = { boot: null, route: 0, poll: null, taskOffset: 0, taskQuery: "", catalogOffset: 0, catalogQuery: "", catalogRegion: "", catalogTab: "username", draft: null, resultViews: new Map() };
+const state = { boot: null, route: 0, poll: null, taskOffset: 0, taskQuery: "", catalogOffset: 0, catalogQuery: "", catalogRegion: "CN", catalogTab: "username", draft: null, resultViews: new Map() };
 const labels = {
   queued: "排队中", running: "研究中", completed: "已完成", failed: "执行失败", interrupted: "已中断", cancelled: "已取消",
-  detected: "发现记录", not_detected: "未发现记录", metadata: "资料信息", unknown: "无法判定", blocked: "查询受限", rate_limited: "请求限流", unsupported: "暂不支持", connection_failed: "连接失败", user_confirmed: "用户确认",
+  detected: "发现记录", not_detected: "未发现记录", metadata: "资料信息", unknown: "无法判定", blocked: "查询受限", rate_limited: "请求限流", unsupported: "暂不支持", connection_failed: "连接失败", user_confirmed: "用户确认", mixed: "样本结果不同",
   username: "用户名", profile: "公开主页", email: "邮箱", phone: "电话号码", ip: "IP 地址", account: "候选账户", confirmation: "关系确认",
   same_username: "使用相同用户名", links_to: "页面外链", mentions_identifier: "页面提及", pending: "待执行", unreachable: "连接失败",
   registration_check: "邮箱字段校验", account_status: "账户状态", authentication_options: "登录方式查询", public_avatar: "公开头像", public_profile: "公开资料",
@@ -155,6 +155,49 @@ async function loadArtifact(run, metadata, container) {
     el("a", { class: "button small", href: `/api/research/${run}/artifacts/${metadata.artifact_id}?download=true` }, "下载原始资料"));
 }
 
+function phoneDetails(item) {
+  const data = item.attributes;
+  const types = { MOBILE: "移动电话", FIXED_LINE: "固定电话", FIXED_LINE_OR_MOBILE: "固定或移动电话", TOLL_FREE: "免费电话", PREMIUM_RATE: "付费服务号码", VOIP: "网络电话", PERSONAL_NUMBER: "个人号码", UNKNOWN: "类型未知" };
+  const formats = { e164: "国际标准格式", international: "国际显示格式", national: "国内显示格式", national_digits: "国内连续号码" };
+  const fields = [
+    ["标准号码", data.e164], ["国内格式", data.national],
+    ["国家 / 地区", [data.country_name, data.region].filter(Boolean).join(" · ")],
+    ["号段地区", data.prefix_description], ["号段原始运营商", data.prefix_carrier],
+    ["号码类型", types[data.number_type] || data.number_type],
+    ["长度规则", typeof data.possible_number === "boolean" ? (data.possible_number ? "符合长度规则" : "未通过长度校验") : null],
+    ["分配号段", typeof data.valid_range === "boolean" ? (data.valid_range ? "符合号段规则" : "未通过号段校验") : null],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+  const suggestions = data.search_suggestions || [];
+  return el("div", { class: "phone-details" }, [
+    info(fields),
+    el("p", { class: "hint phone-limits" }, data.mobile_number_portability === true ? "该地区支持携号转网，号段资料可能与当前运营商不同。号码规则不确认当前启用或可接通状态。" : "地区与运营商来自号段资料。号码规则不确认当前启用或可接通状态。"),
+    suggestions.length > 0 && el("details", { class: "phone-searches" }, [
+      el("summary", {}, `待执行搜索建议 · ${suggestions.length} 项`),
+      el("p", { class: "hint" }, "打开链接后在搜索引擎查看结果。这些建议尚未执行，未计入已查询站点。"),
+      el("ul", { class: "search-suggestion-list" }, suggestions.map(suggestion => el("li", {}, [
+        safeLink(suggestion.url, `${suggestion.engine || new URL(suggestion.url).hostname} · ${formats[suggestion.number_format] || "号码精确搜索"}`),
+        el("code", {}, suggestion.query),
+      ]))),
+    ]),
+  ]);
+}
+
+function emailProgress(progress) {
+  return el("section", { class: "email-progress", "aria-label": "邮箱检查进度", "aria-live": "polite" }, [
+    el("p", { class: "email-scope" }, `覆盖 ${progress.site_count} 个站点，计划 ${progress.planned} 项邮箱检查`),
+    el("div", { class: "email-counts" }, [
+      ["已返回", progress.returned], ["连接失败", progress.connection_failed], ["查询受限", progress.blocked],
+      ["执行失败", progress.failed], ["待处理", progress.pending],
+    ].map(([title, value]) => el("span", {}, [title, el("strong", {}, value)]))),
+    el("p", { class: "hint" }, "每个邮箱分别检查；返回数量表示检查记录数。每条记录保留其实际判定状态。"),
+    progress.failures.length > 0 && el("details", {}, [el("summary", {}, "查看未返回结果的站点"),
+      el("ul", { class: "email-failures" }, progress.failures.map(item => el("li", {}, [
+        el("strong", {}, item.name), status(item.state), el("p", {}, item.error),
+      ]))),
+    ]),
+  ]);
+}
+
 function evidenceCard(run, item, artifacts, number) {
   const detail = el("details", {}, [el("summary", {}, "检测规则、关联与原始资料"), el("div", {}, [
     item.detections.length > 0 && el("ul", { class: "record-list" }, item.detections.map(detection => el("li", {}, [status(detection.state), ` ${detection.reason}`, el("div", { class: "mono muted" }, detection.rule_id), detection.signals.length > 0 && el("div", {}, detection.signals.join(" · "))]))),
@@ -171,6 +214,7 @@ function evidenceCard(run, item, artifacts, number) {
     el("div", { class: "evidence-heading" }, [el("span", { class: "evidence-number" }, `${String(number).padStart(2, "0")} / ${labels[item.kind]}`), status(item.state), item.attributes.conflict && el("span", { class: "status blocked" }, "规则结论冲突")]),
     el("h3", {}, item.attributes.site || item.attributes.site_id || item.subject),
     el("p", { class: "evidence-summary" }, item.summary),
+    item.kind === "phone" && phoneDetails(item),
     item.source_url && safeLink(item.source_url, item.source_url, { class: "source-link" }),
     el("div", { class: "evidence-meta" }, [el("span", {}, date(item.observed_at)),
       ...[...new Set(item.relations.map(relation => relation.kind))].map(kind => el("span", { class: "relation-label" }, labels[kind])),
@@ -185,7 +229,7 @@ async function showEvidence(detail, panel, epoch, focusId) {
   let query = "";
   const filters = el("div", { class: "result-filters", "aria-label": "资料分类" });
   const search = el("input", { type: "search", class: "search", placeholder: "搜索站点、线索或资料", "aria-label": "搜索研究资料" });
-  const rows = el("div", { class: "evidence-list" }), pager = el("div"), note = el("p", { class: "result-note" });
+  const rows = el("div", { class: "evidence-list" }), pager = el("div"), note = el("p", { class: "result-note" }), emailSummary = el("div");
   const notices = {
     pages: "候选页面按来源地址计数。同名仅表示线索，页面外链与用户确认会分别标注。",
     email: "每个站点的检查含义见具体记录。公开头像、公开资料和账户注册状态分别保留。",
@@ -193,7 +237,7 @@ async function showEvidence(detail, panel, epoch, focusId) {
     uncertain: "保留无法判断、查询受限及规则冲突的记录。连接失败详情见执行记录。",
     all: "显示全部采集记录，包括发现、未发现和无法判断的结果。",
   };
-  panel.replaceChildren(el("div", { class: "results-toolbar" }, [filters, search]), note, rows, pager);
+  panel.replaceChildren(el("div", { class: "results-toolbar" }, [filters, search]), note, emailSummary, rows, pager);
   const load = async () => {
     const current = ++sequence;
     const data = await api(`/research/${detail.id}/evidence?${new URLSearchParams({ offset, limit: 30, view, query, evidence_id: focusId || "" })}`);
@@ -205,6 +249,9 @@ async function showEvidence(detail, panel, epoch, focusId) {
     }, [title, el("span", { class: "tab-count" }, data.summary[key].toLocaleString("zh-CN"))])));
     if (focusedView) $(`[data-view="${focusedView}"]`, filters)?.focus({ preventScroll: true });
     note.replaceChildren(...(focusId ? ["报告引用的来源记录。", button("返回资料列表", async () => { focusId = null; location.hash = `#/research/${detail.id}/evidence`; }, "text-button")] : [notices[view]]));
+    const failuresOpen = $("details", emailSummary)?.open;
+    emailSummary.replaceChildren(...(view === "email" && !focusId ? [emailProgress(data.email_progress)] : []));
+    if (failuresOpen && $("details", emailSummary)) $("details", emailSummary).open = true;
     const existing = new Map([...rows.querySelectorAll(".evidence-card")].map(node => [node.id, node]));
     rows.replaceChildren(...(data.items.length ? data.items.map((item, index) => {
       const number = offset + index + 1;
@@ -253,7 +300,7 @@ async function showResearch(id, tab, focusId, epoch) {
   if (epoch !== state.route) return;
   const main = $("#main"), summary = el("div", { class: "run-strip", "aria-live": "polite" }), controls = el("div", { class: "toolbar" });
   const panel = el("div"), runNotice = el("div", { class: "run-notice", hidden: true });
-  let evidenceCount = -1, previousStatus = "", refreshEvidence = null;
+  let evidenceCount = -1, previousStatus = "", previousActions = "", refreshEvidence = null;
   main.replaceChildren(el("header", { class: "research-heading" }, [el("a", { class: "back-link", href: "#/tasks" }, "返回研究"),
     heading(detail.request.identifiers.length ? detail.request.identifiers[0].value + (detail.request.identifiers.length > 1 ? ` 等 ${detail.request.identifiers.length} 条线索` : "") : "公开资料研究", detail.request.goal, [controls]),
     el("div", { class: "evidence-meta" }, detail.request.identifiers.map(item => el("span", {}, labels[item.kind])))]), summary, runNotice,
@@ -277,19 +324,31 @@ async function showResearch(id, tab, focusId, epoch) {
       controls.append(button("重新研究", () => showNew(false, current.request), "button small"));
     }
     if (tab === "overview") panel.replaceChildren(overview(current));
-    else if (tab === "evidence" && (current.evidence_count !== evidenceCount || current.status !== previousStatus)) {
+    else if (tab === "evidence" && (current.evidence_count !== evidenceCount || current.status !== previousStatus || JSON.stringify(current.actions) !== previousActions)) {
       if (refreshEvidence) await refreshEvidence();
       else refreshEvidence = await showEvidence(current, panel, epoch, focusId);
     }
     else if (tab === "report" && (current.status !== previousStatus || current.evidence_count !== evidenceCount)) await showReport(current, panel, epoch);
     else if (tab === "confirm" && current.status !== previousStatus) await showConfirmation(current, panel, epoch);
     if (epoch !== state.route) return;
-    evidenceCount = current.evidence_count; previousStatus = current.status;
+    evidenceCount = current.evidence_count; previousStatus = current.status; previousActions = JSON.stringify(current.actions);
     clearTimeout(state.poll);
     if (!terminal.has(current.status)) state.poll = setTimeout(() => refresh().catch(showError), 2000);
   };
   const refresh = async () => update(await api(`/research/${id}`));
   await update(detail);
+}
+
+function domesticPlatforms() {
+  const states = { available: "用户名查询", restricted: "查询受限", profile_only: "使用主页链接" };
+  return el("section", { class: "domestic-platforms", "aria-label": "常用国内平台" }, [
+    el("h2", {}, "常用国内平台"),
+    el("div", { class: "platform-list" }, state.boot.domestic_platforms.map(platform => el("details", {}, [
+      el("summary", {}, [el("span", {}, platform.name), el("small", {}, states[platform.username_state])]),
+      el("p", {}, platform.input_hint), platform.note && el("p", { class: "hint" }, platform.note),
+      safeLink(platform.url, "打开平台", { class: "platform-link" }),
+    ]))),
+  ]);
 }
 
 async function showCatalog(epoch) {
@@ -309,26 +368,27 @@ async function showCatalog(epoch) {
       return;
     }
     const input = el("input", { type: "search", class: "search", placeholder: "中文名称、英文名称或域名", "aria-label": "搜索站点名称", value: state.catalogQuery });
-    const region = el("select", { "aria-label": "站点地区" }, [el("option", { value: "" }, "全部地区"), el("option", { value: "CN" }, `国内站点 · ${state.boot.capabilities.cn_sites}`)]);
+    const region = el("select", { "aria-label": "站点地区" }, [el("option", { value: "CN" }, `国内站点 · ${state.boot.capabilities.cn_sites}`), el("option", { value: "" }, "全部地区")]);
     region.value = state.catalogRegion;
-    const results = el("div", { class: "section-gap" });
-    content.replaceChildren(el("div", { class: "catalog-tools" }, [el("p", { class: "muted" }, "搜索覆盖整个目录，按页显示查询结果"), el("div", { class: "catalog-controls" }, [input, region])]), results);
+    const results = el("div", { class: "section-gap" }), description = el("p", { class: "muted" });
+    content.replaceChildren(domesticPlatforms(), el("div", { class: "catalog-tools" }, [description, el("div", { class: "catalog-controls" }, [input, region])]), results);
     const load = async () => {
       const query = state.catalogQuery, offset = state.catalogOffset, selectedRegion = state.catalogRegion;
       const data = await api(`/capabilities?${new URLSearchParams({ offset, limit: 30, query, region: selectedRegion })}`);
       if (epoch !== state.route || state.catalogTab !== "username" || query !== state.catalogQuery || offset !== state.catalogOffset || selectedRegion !== state.catalogRegion) return;
+      description.textContent = selectedRegion === "CN" ? "当前浏览国内站点，切换全部地区可搜索完整目录。研究会继续执行全球适配规则。" : "当前浏览完整目录。研究优先检查国内站点，再继续执行其余适配规则。";
       const pager = () => pagination(state.catalogOffset, 30, data.total_sites, async offset => { state.catalogOffset = offset; await load(); });
       results.replaceChildren(el("p", { class: "catalog-result-count", role: "status" }, `共 ${data.total_sites.toLocaleString("zh-CN")} 项，当前显示 ${data.total_sites ? offset + 1 : 0}–${offset + data.sites.length} 项；已适配 ${data.supported_sites.toLocaleString("zh-CN")} 项`), pager(),
       data.sites.length ? el("div", { class: "provider-grid" }, data.sites.map(site => el("article", { class: "panel provider-card" }, [
         el("div", { class: "provider-heading" }, [el("h3", {}, site.name), el("span", { class: "tag" }, site.supported ? "规则已适配" : "规则受限")]),
-        el("div", { class: "provider-body" }, [site.aliases.length > 0 && el("p", {}, site.aliases.join(" · ")), el("p", { class: "mono" }, site.profile_template), el("small", {}, `规则来源：${site.rules.map(rule => rule.rule_id.split(":")[0]).join(" + ")}`), ...site.rules.filter(rule => rule.unsupported).map(rule => el("p", {}, rule.unsupported))]),
+        el("div", { class: "provider-body" }, [site.aliases.length > 0 && el("p", {}, site.aliases.join(" · ")), el("p", { class: "mono" }, site.profile_template), el("p", { class: "site-input-hint" }, site.input_hint), el("small", {}, `规则来源：${site.rules.map(rule => rule.rule_id.split(":")[0]).join(" + ")}`), ...site.rules.filter(rule => rule.unsupported).map(rule => el("p", {}, rule.unsupported))]),
       ]))) : empty("未找到对应站点", "可以使用中文名称、英文名称或域名搜索整个目录。"), pager());
     };
     input.addEventListener("input", debounce(async () => { state.catalogQuery = input.value; state.catalogOffset = 0; await load(); }));
     region.addEventListener("change", action(async () => { state.catalogRegion = region.value; state.catalogOffset = 0; await load(); }));
     await load();
   };
-  main.replaceChildren(heading("站点目录", `默认执行全部 ${state.boot.capabilities.supported_sites.toLocaleString("zh-CN")} 个已适配用户名站点；邮箱按已接入站点检查。这里可以查看覆盖范围与查询限制。`), tabs, content);
+  main.replaceChildren(heading("站点目录", `研究优先检查国内站点，继续执行完整目录中的 ${state.boot.capabilities.supported_sites.toLocaleString("zh-CN")} 个已适配用户名站点。邮箱按已接入站点逐项检查。`), tabs, content);
   await render();
 }
 
@@ -403,7 +463,7 @@ async function route() {
 
 function researchComposer(epoch) {
   const draft = state.draft || { clues: "", goal: "", budget: state.boot.budget };
-  const clues = el("textarea", { id: "clues", rows: 4, required: true, maxlength: 42000, autocomplete: "off", spellcheck: "false", placeholder: "例如 sherlock-project\n或 https://github.com/sherlock-project", "aria-describedby": "clue-help" }, draft.clues);
+  const clues = el("textarea", { id: "clues", rows: 4, required: true, maxlength: 42000, autocomplete: "off", spellcheck: "false", placeholder: "例如 oschina\n或 https://gitee.com/oschina", "aria-describedby": "clue-help" }, draft.clues);
   const goal = el("textarea", { id: "goal", rows: 2, maxlength: 8000, placeholder: "例如：核查这些主页之间有哪些直接链接。留空时，按线索类型整理公开资料。" }, draft.goal);
   const preview = el("div", { class: "intake-preview", "aria-live": "polite" });
   const error = el("div", { id: "form-error", class: "inline-error", role: "alert", hidden: true });
@@ -412,10 +472,10 @@ function researchComposer(epoch) {
   const guide = el("aside", { class: "input-guide", "aria-label": "线索与查询用途" }, [el("h2", {}, "你提供线索，Agent 查找资料"), info([
     ["用户名", "查找使用相同名称的候选主页"], ["主页链接", "提取公开内容与页面外链"], ["邮箱", "检查各站点账户或公开资料状态"], ["电话号码 / IP", "查询号码资料或网络归属信息"],
   ])]);
-  const scope = `默认使用全部 ${state.boot.capabilities.supported_sites.toLocaleString("zh-CN")} 个已适配用户名站点及 ${state.boot.capabilities.email.sites.length} 个邮箱查询站点，按输入类型执行。`;
+  const scope = `国内站点优先，继续执行全部 ${state.boot.capabilities.supported_sites.toLocaleString("zh-CN")} 个适配用户名站点。邮箱使用 ${state.boot.capabilities.email.sites.length} 个接入站点，按线索类型执行。`;
   const form = el("form", { id: "research-form", class: "composer" }, [
-    el("div", { class: "composer-layout" }, [el("div", { class: "clue-field" }, [el("div", { class: "field" }, [el("label", { for: "clues" }, "已知线索"), clues]), el("p", { id: "clue-help", class: "hint" }, "每行一条，最多 20 条。填写完整链接和邮箱；电话号码包含 + 与国家代码。"), preview,
-      button("填写公开项目示例", async () => { clues.value = "https://github.com/sherlock-project"; saveDraft(); await prepare(); clues.focus(); }, "text-button")]), guide]),
+    el("div", { class: "composer-layout" }, [el("div", { class: "clue-field" }, [el("div", { class: "field" }, [el("label", { for: "clues" }, "已知线索"), clues]), el("p", { id: "clue-help", class: "hint" }, "每行一条，最多 20 条。中国大陆 11 位手机号可直接填写；国际号码包含 + 与国家代码。数字用户名添加 username: 前缀。"), preview,
+      button("填写公开项目示例", async () => { clues.value = "https://gitee.com/oschina"; saveDraft(); await prepare(); clues.focus(); }, "text-button")]), guide]),
     el("details", { class: "research-options", open: Boolean(draft.goal) }, [el("summary", {}, "研究问题与运行选项（选填）"), el("div", { class: "field" }, [el("label", { for: "goal" }, "希望核查的问题"), goal]),
       el("details", { class: "form-section" }, [el("summary", {}, "请求与时间预算"), fields])]), error,
     !state.boot.model_configured && el("p", { class: "inline-error" }, ["请在本机配置模型服务。", el("a", { href: "#/settings" }, "查看运行设置")]),
@@ -466,7 +526,7 @@ function researchComposer(epoch) {
 }
 
 async function showNew(example = false, request = null) {
-  state.draft = { clues: request?.identifiers.map(item => item.value).join("\n") || (example ? "https://github.com/sherlock-project" : ""), goal: request?.goal || "", budget: request?.budget || state.boot.budget };
+  state.draft = { clues: request?.identifiers.map(item => item.kind === "username" ? `username:${item.value}` : item.value).join("\n") || (example ? "https://gitee.com/oschina" : ""), goal: request?.goal || "", budget: request?.budget || state.boot.budget };
   if (location.hash === "#/tasks") await route();
   else location.hash = "#/tasks";
 }

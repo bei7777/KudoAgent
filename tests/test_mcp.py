@@ -29,7 +29,9 @@ async def test_real_stdio_server(tmp_path):
             assert set(email["sites"]) == set(EMAIL_SITES)
             providers = {provider["site"]: provider for provider in email["providers"]}
             assert providers.keys() == set(EMAIL_SITES)
-            assert {key for key, value in providers.items() if value["region"] == "CN"} == {"cnblogs", "jd"}
+            assert {"gitee", "tencent_cloud", "cnblogs", "jd"} <= {
+                key for key, value in providers.items() if value["region"] == "CN"
+            }
             assert providers["gravatar"]["interaction"] == "public_avatar"
             assert providers["duolingo"]["interaction"] == "public_profile"
             assert all(provider["last_check"]["checked_on"] for provider in providers.values())

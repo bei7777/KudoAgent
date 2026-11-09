@@ -98,8 +98,9 @@ class HttpExecutor:
                     headers={"User-Agent": "KudoAgent/0.1 (+public-footprint-research)"},
                 )
             client = self.clients[spec.identity_scope]
+            url = httpx.URL(spec.url).copy_merge_params(spec.params) if spec.params else spec.url
             request = client.build_request(
-                spec.method, spec.url, headers=spec.headers, params=spec.params,
+                spec.method, url, headers=spec.headers,
                 data=spec.form, json=spec.json_body,
                 files={key: (None, value) for key, value in spec.multipart.items()} if spec.multipart is not None else None,
             )

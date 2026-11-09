@@ -10,6 +10,8 @@ PROFILE_URL = TypeAdapter(HttpUrl)
 
 def identify_clue(value: str) -> Identifier:
     lowered = value.casefold()
+    if lowered.startswith("username:"):
+        return Identifier(kind="username", value=value.partition(":")[2].strip())
     if "://" in value or lowered.startswith(("http:", "https:", "www.")) or "/" in value or "\\" in value:
         if not lowered.startswith(("http://", "https://")):
             raise ValueError("主页链接必须包含完整的 http:// 或 https:// 地址")
@@ -21,7 +23,23 @@ def identify_clue(value: str) -> Identifier:
     if value.startswith("+"):
         if not phonenumbers.is_possible_number_string(value, None):
             raise ValueError("请填写包含 +、国家代码与完整号码的国际电话号码")
+        number = phonenumbers.parse(value, None)
+        if not phonenumbers.is_valid_number(number):
+            raise ValueError("电话号码无效，请检查国家代码、号段和号码长度")
         return Identifier(kind="phone", value=value)
+    if all(char.isdecimal() or char.isspace() or char == "-" for char in value):
+        digits = phonenumbers.normalize_digits_only(value)
+        if len(digits) == 11 or (len(digits) == 13 and digits.startswith("86")):
+            number = phonenumbers.parse(value, "CN")
+            if (number.country_code != 86 or not phonenumbers.is_valid_number(number)
+                    or phonenumbers.number_type(number) != phonenumbers.PhoneNumberType.MOBILE):
+                raise ValueError(
+                    "中国大陆手机号无效，请检查 11 位号码及号段；国际号码请添加 + 和国家代码；"
+                    "数字用户名可添加 username: 前缀"
+                )
+            return Identifier(
+                kind="phone", value=phonenumbers.format_number(number, phonenumbers.PhoneNumberFormat.E164)
+            )
     if ":" in value or (value[:1].isdigit() and value.count(".") == 3):
         return Identifier(kind="ip", value=value)
     return Identifier(kind="username", value=value)
@@ -44,7 +62,7 @@ class ResearchIntake(Model):
             raise ValueError("线索文本长度不能超过 50,000 个字符")
         lines = {number: line.strip() for number, line in enumerate(value.splitlines(), start=1) if line.strip()}
         if not lines:
-            raise ValueError("请至少填写一条用户名、主页、邮箱、国际电话号码或公共 IP")
+            raise ValueError("请至少填写一条用户名、主页、邮箱、手机号码、国际电话号码或公共 IP")
         return lines
 
     @field_validator("clues", mode="after")

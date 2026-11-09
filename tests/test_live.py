@@ -25,6 +25,25 @@ from kudo_agent.research_core.models import (
 pytestmark = pytest.mark.live
 
 
+async def test_public_request_preserves_url_query_and_merges_parameters(store):
+    run_id = store.create(ResearchRequest(goal="核查公开 HTTP 回显接口的查询参数"), "http-query")
+    http = HttpExecutor(store, run_id, Budget())
+    try:
+        embedded = await http.fetch(RequestSpec(url="https://httpbingo.org/get?marker&source=url"))
+        assert embedded.status_code == 200
+        first = json.loads(http.text(embedded))
+        assert first["args"] == {"marker": [""], "source": ["url"]}
+        assert "?marker&source=url" in first["url"]
+        merged = await http.fetch(RequestSpec(url="https://httpbingo.org/get?source=url",
+                                              params={"extra": "parameter"}))
+        assert merged.status_code == 200
+        second = json.loads(http.text(merged))
+        assert second["args"] == {"source": ["url"], "extra": ["parameter"]}
+        assert store.run(run_id)["request_count"] == 2
+    finally:
+        await http.close()
+
+
 async def test_public_request_dedup_and_restart(tmp_path):
     store = Store(tmp_path / "requests")
     run_id = store.create(ResearchRequest(goal="公开项目 API 核查"), "http-only")
@@ -130,6 +149,7 @@ async def test_full_default_scope_is_persisted(tmp_path):
     async with Application(settings) as app:
         request = ResearchRequest(goal="核查公开项目的完整用户名范围", identifiers=[
             Identifier(kind="username", value="sherlock-project"),
+            Identifier(kind="username", value="oschina"),
         ])
         run_id = app.store.create(request, app.catalog.version)
         planner = Planner(settings, app.store, run_id)
@@ -138,21 +158,30 @@ async def test_full_default_scope_is_persisted(tmp_path):
         try:
             state = {"run_id": run_id, **await workflow.seed({"run_id": run_id})}
             actions = app.store.actions(run_id)
-            assert len(actions) == 8303
+            assert len(actions) == 16606
+            assert {item["payload"]["value"] for item in actions[:262]} == {"sherlock-project", "oschina"}
+            assert all(app.catalog.sites[item["payload"]["site"]].region == "CN" for item in actions[:262])
+            assert all(app.catalog.sites[item["payload"]["site"]].region != "CN" for item in actions[262:])
             assert {item["payload"]["site"] for item in actions} == {
                 site.site_id for site in app.catalog.select([])
             }
             selected = await workflow.plan(state)
             assert len(selected["selected"]) == 50
             assert app.store.decision(run_id, 0)["source"] == "catalog"
-            assert app.get_status(run_id)["coverage"]["remaining"] == 8303
+            assert app.get_status(run_id)["coverage"]["remaining"] == 16606
             assert app.store.model_usage(run_id)["attempts"] == 0
+            explicit = request.model_copy(update={"sites": ["GitHub", "Gitee"],
+                                                  "identifiers": request.identifiers[:1]})
+            explicit_id = app.store.create(explicit, app.catalog.version)
+            await workflow.seed({"run_id": explicit_id})
+            assert [app.catalog.sites[row["payload"]["site"]].name
+                    for row in app.store.actions(explicit_id)] == ["GitHub", "Gitee"]
         finally:
             await http.close()
             await planner.close()
     reopened = Store(settings.data_dir)
     try:
-        assert len(reopened.actions(run_id)) == 8303
+        assert len(reopened.actions(run_id)) == 16606
         assert reopened.decision(run_id, 0)["actions"][0]["action_id"] == selected["selected"][0]
     finally:
         reopened.close()

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import time
 from dataclasses import dataclass, field
 from urllib.parse import quote, urljoin, urlsplit
 from uuid import uuid4
@@ -32,7 +33,8 @@ class EmailCollector:
                     "mozilla": self.mozilla, "wordpress": self.wordpress, "gravatar": self.gravatar,
                     "duolingo": self.duolingo, "replit": self.replit, "imgur": self.imgur,
                     "lastfm": self.lastfm, "freelancer": self.freelancer,
-                    "cnblogs": self.cnblogs, "jd": self.jd}
+                    "cnblogs": self.cnblogs, "jd": self.jd, "gitee": self.gitee,
+                    "tencent_cloud": self.tencent_cloud}
         if self.site not in handlers:
             raise ValueError(f"未知邮箱提供方：{self.site}")
         return await handlers[self.site]()
@@ -97,6 +99,52 @@ class EmailCollector:
         if response.status_code == 200:
             return self.boolean(False, response)
         return self.result("unknown", "邮箱校验没有返回明确结果", response)
+
+    async def gitee(self):
+        bootstrap = await self.fetch("https://gitee.com/login")
+        if result := self.http_result(bootstrap):
+            return result
+        page = BeautifulSoup(self.http.text(bootstrap), "html.parser")
+        csrf = page.select_one('meta[name="csrf-token"]')
+        if csrf is None or not csrf.get("content"):
+            raise ValueError("Gitee 登录页面缺少 CSRF 令牌")
+        response = await self.fetch("https://gitee.com/check_oversea_email", method="POST",
+                                    form={"number": self.email},
+                                    headers={"X-CSRF-Token": csrf["content"],
+                                             "X-Requested-With": "XMLHttpRequest",
+                                             "Referer": bootstrap.final_url})
+        if result := self.http_result(response):
+            return result
+        payload = self.json_object(response)
+        code = payload["status"]
+        if type(code) not in {int, str}:
+            raise ValueError("Gitee 邮箱检查缺少明确的业务状态")
+        if str(code) in {"0", "1"}:
+            return self.boolean(str(code) == "1", response)
+        if str(code) in {"2", "3"}:
+            return self.result("unknown", "邮箱状态检查需要补充验证，账户状态未知", response,
+                               result_code=code)
+        raise ValueError(f"Gitee 返回未定义的邮箱检查状态：{code}")
+
+    async def tencent_cloud(self):
+        response = await self.fetch("https://cloud.tencent.com/auth-api/register/checkAccountExist",
+                                    params={"t": str(time.time_ns() // 1_000_000),
+                                            "payload": json.dumps({"username": self.email})},
+                                    headers={"Referer": "https://cloud.tencent.com/register"})
+        if result := self.http_result(response):
+            return result
+        payload = self.json_object(response)
+        if type(payload.get("success")) not in {bool, int} or payload["success"] not in {0, 1}:
+            raise ValueError("腾讯云邮箱校验缺少有效的 success 状态")
+        if payload["success"]:
+            return self.result("not_detected", "邮箱字段校验通过，接口允许继续注册", response)
+        code = payload["code"]
+        if not isinstance(code, str):
+            raise ValueError("腾讯云邮箱校验业务代码必须为字符串")
+        if code in {"Account.AlreadyExist", "Account.AlreadyExistInDNSPOD", "Account.AreaNotMatch"}:
+            return self.result("detected", "邮箱对应腾讯云或关联账户体系的记录", response,
+                               result_code=code, account_scope="腾讯云及 DNSPod 账户体系")
+        return self.result("unknown", f"邮箱校验返回 {code}，账户状态未知", response, result_code=code)
 
     async def pinterest(self):
         bootstrap = await self.fetch("https://www.pinterest.com/signup/")

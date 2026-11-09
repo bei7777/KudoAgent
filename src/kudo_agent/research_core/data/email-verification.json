@@ -2,6 +2,8 @@
   "checked_on": "2026-11-09",
   "accuracy": "not_established",
   "providers": {
+    "tencent_cloud": {"checked_on": "2026-11-10", "samples": 2, "state": "not_detected", "observation": "两个样本均 HTTP 200、success 1；接口允许继续注册，实际账户情况尚未独立确认"},
+    "gitee": {"checked_on": "2026-11-10", "samples": 2, "state": "mixed", "observation": "两个样本均 HTTP 200；分别返回 status 1（已有账户）与 0（可继续注册），实际账户情况尚未独立确认"},
     "github": {"samples": 2, "state": "blocked", "observation": "注册页面 HTTP 403"},
     "pinterest": {"samples": 2, "state": "blocked", "observation": "资源查询 HTTP 403"},
     "spotify": {"samples": 2, "state": "connection_failed", "observation": "当前环境的 TLS 连接失败"},

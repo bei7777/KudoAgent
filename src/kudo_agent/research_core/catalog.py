@@ -8,6 +8,20 @@ from kudo_agent import __version__
 from kudo_agent.research_core.models import RequestSpec, digest
 from kudo_agent.upstream import maigret, sherlock
 
+DOMESTIC_PRIORITY = {name: position for position, name in enumerate((
+    "Gitee", "CSDN", "Zhihu", "Douban", "Baidu", "v2ex.com", "cnblogs.com", "Juejin",
+    "Yuque", "GitCode", "Bilibili", "Weibo",
+))}
+INPUT_HINTS = {
+    "Juejin": "填写掘金数字用户 ID，或完整公开主页链接。",
+    "NetEase Music": "填写网易云音乐数字用户 ID，或完整公开主页链接。",
+    "Bilibili": "该规则需要哔哩哔哩数字 UID；请提供包含 UID 的完整公开主页链接。",
+    "QQ": "该规则需要 QQ 号码；请提供完整公开空间链接。",
+    "Weibo": "用户名查询需要微博访客会话激活；当前可提供完整公开主页链接进行资料分析。",
+    "Zhihu": "填写知乎个人主页地址中的标识符，或完整公开主页链接。",
+    "Baidu": "填写百度用户名，或完整公开主页链接。",
+}
+
 
 @dataclass
 class Rule:
@@ -62,6 +76,15 @@ class Site:
     def region(self):
         return "CN" if any("cn" in rule.data.get("tags", []) for rule in self.rules) else ""
 
+    @property
+    def sort_key(self) -> tuple[bool, int, int, str]:
+        return (self.region != "CN", DOMESTIC_PRIORITY.get(self.name, len(DOMESTIC_PRIORITY)),
+                self.rank, self.site_id)
+
+    @property
+    def input_hint(self) -> str:
+        return INPUT_HINTS.get(self.name, "填写该站点用户名，或完整公开主页链接。")
+
     def matches(self, query: str):
         terms = query.casefold().strip().split()
         text = " ".join([self.site_id, self.name, self.template, *self.aliases,
@@ -79,6 +102,7 @@ class Site:
             "supported": self.supported,
             "aliases": self.aliases, "region": self.region,
             "input_types": sorted({rule.data.get("type", "username") for rule in self.rules}),
+            "input_hint": self.input_hint,
             "rules": [{"rule_id": r.rule_id, "unsupported": r.unsupported} for r in self.rules],
         }
 
@@ -144,7 +168,7 @@ class Catalog:
     def select(self, names: list[str], maximum: int | None = None) -> list[Site]:
         if not names:
             return sorted(
-                (s for s in self.sites.values() if s.supported), key=lambda s: (s.rank, s.site_id)
+                (s for s in self.sites.values() if s.supported), key=lambda s: s.sort_key
             )[:maximum]
         selected = {}
         for name in names:

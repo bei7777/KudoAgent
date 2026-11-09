@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+from collections import Counter
 
 from filelock import FileLock, Timeout
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -13,7 +14,8 @@ from kudo_agent.research_agent.planner import Planner
 from kudo_agent.research_agent.workflow import Workflow
 from kudo_agent.research_core.catalog import Catalog
 from kudo_agent.research_core.collectors import Collectors
-from kudo_agent.research_core.email_sites import email_capabilities
+from kudo_agent.research_core.domestic import DOMESTIC_PLATFORMS
+from kudo_agent.research_core.email_sites import EMAIL_PROVIDERS, email_capabilities
 from kudo_agent.research_core.http import HttpExecutor
 from kudo_agent.research_core.models import (
     EMAIL_SITES,
@@ -56,7 +58,7 @@ class Application:
             raise ValueError("offset 必须非负，limit 必须介于 1 和 500")
         if region not in {"", "CN"}:
             raise ValueError("region 只能为空或 CN")
-        sites = sorted(self.catalog.sites.values(), key=lambda s: (s.rank, s.name))
+        sites = sorted(self.catalog.sites.values(), key=lambda s: s.sort_key)
         catalog_total = len(sites)
         domestic = [site for site in sites if site.region == "CN"]
         if region:
@@ -69,6 +71,7 @@ class Application:
             "supported_sites": sum(site.supported for site in sites),
             "catalog_total": catalog_total, "cn_sites": len(domestic),
             "cn_supported_sites": sum(site.supported for site in domestic),
+            "domestic_platforms": DOMESTIC_PLATFORMS,
             "sites": [site.public() for site in sites[offset:offset + limit]],
             "email": {"sites": list(EMAIL_SITES), "providers": email_capabilities(),
                       "validation": "需要使用自有邮箱核对当前接口结果"},
@@ -77,7 +80,7 @@ class Application:
                       "required_settings": ["KUDO_BASE_URL", "KUDO_MODEL", self.settings.api_key_env]},
             "behavior": {"start": "立即返回 run_id，在当前服务进程内执行",
                          "resume": "复用已完成资料；未确认完成的账户请求需要明确允许重新执行",
-                         "scope": "默认查询全部已适配用户名规则和全部邮箱查询站点；按输入类型执行"},
+                         "scope": "国内站点优先，默认查询全部已适配用户名规则和全部邮箱查询站点；按输入类型执行"},
         }
 
     def start_research(self, request: ResearchRequest) -> dict:
@@ -107,11 +110,17 @@ class Application:
                 "scope": {"username_sites": len(self.catalog.select(request.sites, request.budget.max_sites)),
                           "email_sites": len(request.email_sites)},
                 "timeline": self.store.decisions(run_id),
-                "query_failures": [{"site": self.catalog.sites[item["payload"]["site"]].name
-                                    if item["payload"]["site"] in self.catalog.sites else item["payload"]["capability"],
+                "query_failures": [{"site": self._query_name(item["payload"]),
                                     "error": item["error"], "state": item["status"]}
                                    for item in self.store.failed_queries(run_id)[-20:]],
                 "uncertain_accounts": len(self.store.uncertain_requests(run_id))}
+
+    def _query_name(self, payload: dict) -> str:
+        if payload["capability"] == "email":
+            return EMAIL_PROVIDERS[payload["site"]].name
+        if payload["site"] in self.catalog.sites:
+            return self.catalog.sites[payload["site"]].name
+        return payload["capability"]
 
     def get_artifact(self, run_id: str, artifact_id: str):
         self.store.run(run_id)
@@ -288,9 +297,28 @@ class Application:
         selected = [item for item, _ in matching[offset:offset + limit]]
         artifact_ids = {identifier for item in selected for identifier in item.artifact_ids}
         return {"total": len(items), "filtered_total": len(matching), "summary": summary,
+                "email_progress": self._email_progress(run_id),
                 "items": [e.model_dump() for e in selected],
                 "artifacts": [item.model_dump() for item in self.store.artifacts(run_id)
                               if item.artifact_id in artifact_ids]}
+
+    def _email_progress(self, run_id: str) -> dict:
+        actions = self.store.db.execute(
+            "SELECT json_extract(payload, '$.site') AS site, status, error FROM actions "
+            "WHERE run_id=? AND json_extract(payload, '$.capability')='email' ORDER BY rowid",
+            (run_id,),
+        ).fetchall()
+        counts = Counter(item["status"] for item in actions)
+        terminal = {"completed", "unreachable", "blocked", "failed"}
+        return {
+            "planned": len(actions), "returned": counts["completed"],
+            "connection_failed": counts["unreachable"], "blocked": counts["blocked"],
+            "failed": counts["failed"], "pending": sum(count for status, count in counts.items() if status not in terminal),
+            "site_count": len({item["site"] for item in actions}),
+            "failures": [{"site": item["site"], "name": EMAIL_PROVIDERS[item["site"]].name,
+                          "state": item["status"], "error": item["error"]}
+                         for item in actions if item["status"] in {"unreachable", "blocked", "failed"}],
+        }
 
     def get_report(self, run_id: str, format: str = "markdown"):
         if format == "markdown":

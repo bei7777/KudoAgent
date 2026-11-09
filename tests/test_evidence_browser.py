@@ -57,6 +57,10 @@ async def test_metadata_browsing_uses_real_number_library(tmp_path):
             await http.close()
         response = app.get_evidence(run_id, view="metadata", query="41446681800")
         assert response["summary"] == {"all": 1, "pages": 0, "email": 0, "metadata": 1, "uncertain": 0}
+        assert response["email_progress"] == {
+            "planned": 0, "returned": 0, "connection_failed": 0, "blocked": 0,
+            "failed": 0, "pending": 0, "site_count": 0, "failures": [],
+        }
         assert response["total"] == response["filtered_total"] == 1
         assert response["items"][0]["attributes"]["region"] == "CH"
         assert response["items"][0]["state"] == "metadata"
@@ -148,3 +152,52 @@ def test_recorded_email_counts_include_unknown_and_unavailable(researched_app):
     filtered = app.get_evidence(row["run_id"], view="email", query=provider)
     assert response["items"][0]["evidence_id"] in {item["evidence_id"] for item in filtered["items"]}
     assert filtered["summary"] == response["summary"]
+
+
+def test_recorded_email_progress_explains_missing_spotify_response(researched_app):
+    app = researched_app
+    row = app.store.db.execute(
+        "SELECT run_id FROM actions WHERE json_extract(payload, '$.capability')='email' "
+        "GROUP BY run_id HAVING count(*)=13 AND sum(status='completed')=12 "
+        "AND sum(status='unreachable' AND json_extract(payload, '$.site')='spotify')=1 LIMIT 1"
+    ).fetchone()
+    assert row is not None, "采集记录需要包含 13 项邮箱查询，其中 Spotify 连接失败，其余 12 项返回结果"
+    run_id = row["run_id"]
+    response = app.get_evidence(run_id, view="email")
+    progress = response["email_progress"]
+    assert {key: value for key, value in progress.items() if key != "failures"} == {
+        "planned": 13, "returned": 12, "connection_failed": 1, "blocked": 0,
+        "failed": 0, "pending": 0, "site_count": 13,
+    }
+    assert response["summary"]["email"] == 12
+    failure = progress["failures"][0]
+    assert len(progress["failures"]) == 1
+    assert failure["site"] == "spotify"
+    assert failure["name"] == "Spotify"
+    assert failure["state"] == "unreachable"
+    assert failure["error"] == app.store.failed_queries(run_id)[0]["error"]
+    assert app.get_research(run_id)["query_failures"] == [{
+        "site": "Spotify", "state": "unreachable", "error": failure["error"],
+    }]
+    assert app.get_evidence(run_id, limit=1, view="email", query="GitHub")["email_progress"] == progress
+
+
+def test_recorded_email_progress_counts_failed_actions_separately(researched_app):
+    app = researched_app
+    row = app.store.db.execute(
+        "SELECT run_id, count(*) AS planned, count(DISTINCT json_extract(payload, '$.site')) AS sites, "
+        "sum(status='completed') AS returned, sum(status='failed') AS failed "
+        "FROM actions WHERE json_extract(payload, '$.capability')='email' "
+        "GROUP BY run_id HAVING sum(status='failed')>0 LIMIT 1"
+    ).fetchone()
+    assert row is not None, "采集记录需要包含真实执行失败的邮箱查询"
+    progress = app.get_evidence(row["run_id"], view="email")["email_progress"]
+    assert progress["planned"] == row["planned"]
+    assert progress["site_count"] == row["sites"]
+    assert progress["returned"] == row["returned"]
+    assert progress["failed"] == row["failed"]
+    assert progress["planned"] == sum(progress[key] for key in (
+        "returned", "connection_failed", "blocked", "failed", "pending",
+    ))
+    assert sum(item["state"] == "failed" for item in progress["failures"]) == row["failed"]
+    assert all(item["name"] != "email" for item in progress["failures"])

@@ -8,7 +8,7 @@ from kudo_agent.research_core.catalog import Catalog
 from kudo_agent.research_core.collectors import Collectors
 from kudo_agent.research_core.email_sites import EmailSample
 from kudo_agent.research_core.http import HttpExecutor
-from kudo_agent.research_core.models import Action, Identifier, ResearchRequest
+from kudo_agent.research_core.models import EMAIL_SITES, Action, Identifier, ResearchRequest
 
 
 async def main():
@@ -16,11 +16,14 @@ async def main():
     parser.add_argument("--samples", type=Path, required=True)
     parser.add_argument("--sample-index", type=int, required=True)
     parser.add_argument("--data-dir", type=Path, required=True)
+    parser.add_argument("--site", choices=EMAIL_SITES, help="检查另一个站点，原样本的注册状态只用于原站点")
     args = parser.parse_args()
     samples = json.loads(args.samples.read_text(encoding="utf-8"))
     if not 0 <= args.sample_index < len(samples):
         raise ValueError("sample-index 超出样本范围")
     sample = EmailSample.model_validate(samples[args.sample_index])
+    if args.site and args.site != sample.site:
+        sample = sample.model_copy(update={"site": args.site, "registered": None, "observed": None})
     expected = sample.expected_presence
     identifier = Identifier(kind="email", value=sample.email)
     request = ResearchRequest(goal="自有邮箱关联资料核查", identifiers=[identifier], email_sites=[sample.site])

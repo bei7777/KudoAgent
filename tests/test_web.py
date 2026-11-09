@@ -2,6 +2,7 @@ from starlette.testclient import TestClient
 
 from kudo_agent.application.config import Settings
 from kudo_agent.integrations.web import create_web_app
+from kudo_agent.research_core.models import EMAIL_SITES
 
 
 def test_web_assets_and_real_capabilities(tmp_path):
@@ -15,7 +16,18 @@ def test_web_assets_and_real_capabilities(tmp_path):
         data = client.get("/api/bootstrap").json()
         assert data["model_configured"] is False
         assert "api_key" not in data
-        assert len(data["capabilities"]["email"]["providers"]) == 13
+        providers = data["capabilities"]["email"]["providers"]
+        assert len(providers) == len(EMAIL_SITES) == 15
+        assert {provider["site"] for provider in providers} == set(EMAIL_SITES)
+        assert {"Gitee", "腾讯云", "博客园", "京东"} <= {
+            provider["name"] for provider in providers if provider["region"] == "CN"
+        }
+        platforms = {platform["name"]: platform for platform in data["domestic_platforms"]}
+        assert len(platforms) == 10
+        assert platforms["抖音"]["username_state"] == "profile_only"
+        assert platforms["小红书"]["username_state"] == "profile_only"
+        assert platforms["微博"]["username_state"] == "restricted"
+        assert platforms["Gitee"]["username_state"] == "available"
         assert client.get("/api/research").json()["items"] == []
         sites = client.get("/api/capabilities?query=GitHub").json()["sites"]
         assert any(site["name"] == "GitHub" for site in sites)
@@ -26,7 +38,12 @@ def test_web_full_catalog_chinese_search_and_paging(tmp_path):
         first = client.get("/api/capabilities?limit=30").json()
         second = client.get("/api/capabilities?offset=30&limit=30").json()
         assert first["total_sites"] == second["total_sites"] == 9011
+        assert first["supported_sites"] == 8303
         assert len(first["sites"]) == len(second["sites"]) == 30
+        assert all(site["region"] == "CN" for site in first["sites"] + second["sites"])
+        assert [site["name"] for site in first["sites"][:8]] == [
+            "Gitee", "CSDN", "Zhihu", "Douban", "Baidu", "v2ex.com", "cnblogs.com", "Juejin",
+        ]
         assert not {site["site_id"] for site in first["sites"]} & {site["site_id"] for site in second["sites"]}
         domestic = client.get("/api/capabilities?region=CN&limit=100").json()
         assert domestic["total_sites"] == first["cn_sites"] > 30
@@ -37,6 +54,11 @@ def test_web_full_catalog_chinese_search_and_paging(tmp_path):
         bilibili = client.get("/api/capabilities", params={"query": "哔哩哔哩"}).json()
         assert bilibili["sites"][0]["supported"] is False
         assert "UID" in bilibili["sites"][0]["rules"][0]["unsupported"]
+        assert "UID" in bilibili["sites"][0]["input_hint"]
+        juejin = client.get("/api/capabilities", params={"query": "掘金"}).json()
+        assert "数字用户 ID" in juejin["sites"][0]["input_hint"]
+        weibo = client.get("/api/capabilities", params={"query": "微博"}).json()
+        assert "会话激活" in weibo["sites"][0]["input_hint"]
         assert client.get("/api/capabilities?region=invalid").status_code == 422
         assert client.get("/api/bootstrap").json()["budget"]["max_sites"] is None
 

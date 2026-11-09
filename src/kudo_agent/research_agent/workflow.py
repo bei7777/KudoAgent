@@ -10,6 +10,7 @@ from kudo_agent.evidence.store import Store
 from kudo_agent.research_agent.planner import Planner
 from kudo_agent.research_core.catalog import Catalog
 from kudo_agent.research_core.collectors import Collectors
+from kudo_agent.research_core.email_sites import EMAIL_PROVIDERS
 from kudo_agent.research_core.http import QueryConnectionError, QueryTargetBlocked
 from kudo_agent.research_core.models import (
     Action,
@@ -39,6 +40,15 @@ class Workflow:
     def request(self, run_id: str) -> ResearchRequest:
         return ResearchRequest.model_validate(self.store.run(run_id)["request"])
 
+    def initial_priority(self, action: Action, explicit_sites: bool) -> int:
+        if action.capability == "username":
+            if explicit_sites:
+                return 1
+            return 1 if self.catalog.sites[action.site].region == "CN" else 2
+        if action.capability == "email":
+            return 1 if EMAIL_PROVIDERS[action.site].region == "CN" else 2
+        return 0
+
     async def seed(self, state: State):
         run_id = state["run_id"]
         request = self.request(run_id)
@@ -56,7 +66,9 @@ class Workflow:
                 actions += [Action(capability="email", value=identifier.value, site=s) for s in request.email_sites]
             else:
                 actions.append(Action(capability=identifier.kind, value=identifier.value))
-        self.store.add_actions(run_id, actions)
+        self.store.add_actions(run_id, sorted(
+            actions, key=lambda action: self.initial_priority(action, bool(request.sites))
+        ))
         return {"round": 0, "selected": [], "stop_reason": ""}
 
     async def plan(self, state: State):

@@ -4,7 +4,7 @@ from importlib.resources import files
 
 from pydantic import StrictBool, model_validator
 
-from kudo_agent.research_core.models import EmailSite, Identifier, Model
+from kudo_agent.research_core.models import EMAIL_SITES, EmailSite, Identifier, Model
 
 
 @dataclass(frozen=True)
@@ -17,6 +17,14 @@ class EmailProvider:
 
 
 EMAIL_PROVIDERS = {
+    "gitee": EmailProvider("Gitee", "account_status", "https://gitee.com/login",
+                           "邮箱登录流程中的独立账户状态检查", region="CN"),
+    "tencent_cloud": EmailProvider("腾讯云", "registration_check", "https://cloud.tencent.com/register",
+                                   "注册表单的邮箱账户检查，保留腾讯云及 DNSPod 账户体系说明", region="CN"),
+    "cnblogs": EmailProvider("博客园", "registration_check", "https://account.cnblogs.com/signup",
+                             "注册表单的独立邮箱字段校验", region="CN"),
+    "jd": EmailProvider("京东", "registration_check", "https://reg.jd.com/reg/person",
+                        "注册表单的独立邮箱字段校验", region="CN"),
     "github": EmailProvider("GitHub", "registration_check", "https://github.com/signup",
                             "注册表单的邮箱字段校验"),
     "pinterest": EmailProvider("Pinterest", "registration_check", "https://www.pinterest.com/signup/",
@@ -39,10 +47,6 @@ EMAIL_PROVIDERS = {
                             "注册表单的独立邮箱字段校验"),
     "freelancer": EmailProvider("Freelancer", "registration_check", "https://www.freelancer.com/signup",
                                 "用户字段检查接口返回的邮箱可用性"),
-    "cnblogs": EmailProvider("博客园", "registration_check", "https://account.cnblogs.com/signup",
-                             "注册表单的独立邮箱字段校验", region="CN"),
-    "jd": EmailProvider("京东", "registration_check", "https://reg.jd.com/reg/person",
-                        "注册表单的独立邮箱字段校验", region="CN"),
 }
 
 
@@ -50,9 +54,9 @@ def email_capabilities() -> list[dict]:
     checks = json.loads(files("kudo_agent.research_core").joinpath("data/email-verification.json").read_text(encoding="utf-8"))
     if checks["providers"].keys() != EMAIL_PROVIDERS.keys():
         raise ValueError("邮箱提供方与验证记录不一致")
-    return [{"site": site, **asdict(provider), "last_check": {
+    return [{"site": site, **asdict(EMAIL_PROVIDERS[site]), "last_check": {
         "checked_on": checks["checked_on"], "accuracy": checks["accuracy"], **checks["providers"][site],
-    }} for site, provider in EMAIL_PROVIDERS.items()]
+    }} for site in EMAIL_SITES]
 
 
 class EmailSample(Model):

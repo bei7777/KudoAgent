@@ -2,7 +2,7 @@ import hashlib
 import json
 import re
 from importlib.metadata import version
-from urllib.parse import urlencode, urljoin, urlsplit
+from urllib.parse import unquote, urlencode, urljoin, urlsplit
 
 import phonenumbers
 from bs4 import BeautifulSoup
@@ -27,6 +27,102 @@ from kudo_agent.research_core.models import (
     timestamp,
 )
 from kudo_agent.upstream import maigret, sherlock
+
+
+def phone_metadata(value: str) -> dict:
+    number = phonenumbers.parse(value, None)
+    region = phonenumbers.region_code_for_number(number)
+    formats = {
+        "e164": phonenumbers.format_number(number, phonenumbers.PhoneNumberFormat.E164),
+        "international": phonenumbers.format_number(
+            number, phonenumbers.PhoneNumberFormat.INTERNATIONAL),
+        "national": phonenumbers.format_number(number, phonenumbers.PhoneNumberFormat.NATIONAL),
+    }
+    formats["national_digits"] = phonenumbers.normalize_digits_only(formats["national"])
+    order = ("national_digits", "national", "e164", "international") if region == "CN" else (
+        "e164", "international", "national", "national_digits")
+    number_formats = []
+    for kind in order:
+        if formats[kind] not in {item["value"] for item in number_formats}:
+            number_formats.append({"kind": kind, "value": formats[kind]})
+    engines = [("Google", "https://www.google.com/search", "q"),
+               ("Bing", "https://www.bing.com/search", "q")]
+    if region == "CN":
+        engines.insert(0, ("Baidu", "https://www.baidu.com/s", "wd"))
+    suggestions = []
+    for engine, endpoint, parameter in engines:
+        for item in number_formats:
+            query = f'"{item["value"]}"'
+            suggestions.append({
+                "engine": engine, "category": "exact_number", "number_format": item["kind"],
+                "query": query, "url": endpoint + "?" + urlencode({parameter: query}),
+                "state": "not_executed",
+            })
+    return {
+        **formats,
+        "country_code": number.country_code,
+        "country_name": geocoder.country_name_for_number(number, "zh"),
+        "possible_number": phonenumbers.is_possible_number(number),
+        "possibility_reason": phonenumbers.ValidationResult.to_string(
+            phonenumbers.is_possible_number_with_reason(number)),
+        "valid_range": phonenumbers.is_valid_number(number),
+        "region": region,
+        "prefix_description": geocoder.description_for_number(number, "zh"),
+        "prefix_carrier": carrier.name_for_number(number, "en"),
+        "mobile_number_portability": phonenumbers.is_mobile_number_portable_region(region),
+        "time_zones": list(timezone.time_zones_for_number(number)),
+        "number_type": phonenumbers.PhoneNumberType.to_string(phonenumbers.number_type(number)),
+        "number_formats": number_formats,
+        "search_suggestions": suggestions,
+        "limitations": [
+            "号码有效性表示长度和号段符合规则，当前启用及可接通状态尚未核实。",
+            "地区来自号码分配规则；运营商资料表示号段原始运营商，携号转网可能改变当前运营商。",
+            "搜索建议尚未执行，打开链接后才能查看对应搜索结果。",
+        ],
+    }
+
+
+def phone_mentions(page_text: str, tel_links: list[dict], identifiers: list[Identifier],
+                   source_url: str) -> list[dict]:
+    regions = {}
+    for identifier in identifiers:
+        if identifier.kind != "phone":
+            continue
+        number = phonenumbers.parse(identifier.value, None)
+        region = phonenumbers.region_code_for_number(number)
+        regions.setdefault(region, {})[identifier.value] = number
+    mentions = []
+    for region, targets in regions.items():
+        for match in phonenumbers.PhoneNumberMatcher(page_text, region):
+            for normalized, number in targets.items():
+                if phonenumbers.is_number_match(number, match.number) == phonenumbers.MatchType.EXACT_MATCH:
+                    mentions.append({
+                        "location": "body", "coordinate_space": "extracted_body",
+                        "normalized": normalized, "raw": match.raw_string,
+                        "start": match.start, "end": match.end,
+                        "context": page_text[max(0, match.start - 48):match.end + 48],
+                        "source_url": source_url, "assumed_region": region, "match": "exact",
+                    })
+    for link in tel_links:
+        text = unquote(link["href"])
+        parsed = urlsplit(text)
+        # RFC 3966 的局部 phone-context 仅表示作用域，无法据此确认全球号码。
+        if parsed.scheme != "tel" or not parsed.path.startswith("+"):
+            continue
+        if not phonenumbers.is_possible_number_string(text, None):
+            continue
+        uri_number = phonenumbers.parse(text, None)
+        if not phonenumbers.is_valid_number(uri_number):
+            continue
+        for targets in regions.values():
+            for normalized, number in targets.items():
+                if phonenumbers.is_number_match(number, uri_number) == phonenumbers.MatchType.EXACT_MATCH:
+                    mentions.append({
+                        **link, "location": "tel", "coordinate_space": "decoded_href",
+                        "normalized": normalized, "raw": text, "start": 0, "end": len(text),
+                        "context": text, "source_url": source_url, "assumed_region": None, "match": "exact",
+                    })
+    return mentions
 
 
 class Collectors:
@@ -75,7 +171,10 @@ class Collectors:
                 detections.append(Detection(rule_id=rule.rule_id, state="unsupported", reason=rule.unsupported))
                 continue
             if not rule.valid_username(action.value):
-                detections.append(Detection(rule_id=rule.rule_id, state="not_detected", reason="用户名不符合站点格式"))
+                detections.append(Detection(
+                    rule_id=rule.rule_id, state="unsupported",
+                    reason="输入不符合该站点查询格式，请提供对应标识符或完整主页链接",
+                ))
                 continue
             spec = rule.request(action.value)
             artifact = await self.http.fetch(spec)
@@ -116,6 +215,10 @@ class Collectors:
                              action.value, [artifact])
         soup = BeautifulSoup(text, "html.parser")
         title = soup.title.get_text(" ", strip=True) if soup.title else ""
+        if urlsplit(artifact.final_url).hostname == "passport.weibo.com" or title == "Sina Visitor System":
+            return self.item(action, "profile", "blocked", "微博主页要求访客会话激活，尚未取得主页内容",
+                             action.value, [artifact], attributes={"title": title,
+                                                                  "access_url": artifact.final_url})
         description = soup.find("meta", attrs={"name": "description"})
         metadata = {"title": title, "description": description.get("content", "") if description else "",
                     "language": soup.html.get("lang", "") if soup.html else ""}
@@ -124,12 +227,15 @@ class Collectors:
         content = soup.find("main") or soup.find(attrs={"role": "main"}) or soup.body or soup
         for tag in content.select("script,style,noscript,nav,header,footer,[role=navigation],[role=banner],[role=contentinfo]"):
             tag.decompose()
-        links = set()
-        for anchor in content.find_all("a", href=True):
+        links, tel_links = set(), []
+        for index, anchor in enumerate(content.find_all("a", href=True)):
             url = urljoin(artifact.final_url, anchor["href"])
             parsed = urlsplit(url)
             if parsed.scheme in {"http", "https"} and parsed.hostname and not parsed.username and not parsed.password:
                 links.add(canonical_url(url))
+            elif parsed.scheme == "tel":
+                tel_links.append({"href": anchor["href"], "link_index": index,
+                                  "source_line": anchor.sourceline, "source_column": anchor.sourcepos})
         page_text = content.get_text(" ", strip=True)
         candidates = []
         for site in self.catalog.sites.values():
@@ -152,9 +258,17 @@ class Collectors:
         item.relations = [Relation(source=artifact.final_url, target=url, kind="links_to",
                                    evidence_ids=[item.evidence_id]) for url in attributes["links"]]
         request = ResearchRequest.model_validate(self.store.run(self.run_id)["request"])
+        mentions = phone_mentions(page_text, tel_links, request.identifiers, artifact.final_url)
+        item.attributes["phone_mentions"] = mentions
+        if any(identifier.kind == "phone" for identifier in request.identifiers):
+            item.rule_versions.append(f"phonenumbers@{version('phonenumbers')}")
         for identifier in request.identifiers:
-            pattern = re.compile(r"(?<!\w)" + re.escape(identifier.value) + r"(?!\w)", re.IGNORECASE)
-            if pattern.search(page_text):
+            if identifier.kind == "phone":
+                mentioned = any(item["normalized"] == identifier.value for item in mentions)
+            else:
+                pattern = re.compile(r"(?<!\w)" + re.escape(identifier.value) + r"(?!\w)", re.IGNORECASE)
+                mentioned = bool(pattern.search(page_text))
+            if mentioned:
                 item.relations.append(Relation(
                     source=artifact.final_url, target=f"{identifier.kind}:{identifier.value}",
                     kind="mentions_identifier", evidence_ids=[item.evidence_id],
@@ -162,22 +276,8 @@ class Collectors:
         return item
 
     async def phone(self, action: Action) -> Evidence:
-        number = phonenumbers.parse(action.value, None)
-        data = {
-            "e164": phonenumbers.format_number(number, phonenumbers.PhoneNumberFormat.E164),
-            "international": phonenumbers.format_number(number, phonenumbers.PhoneNumberFormat.INTERNATIONAL),
-            "valid_range": phonenumbers.is_valid_number(number),
-            "region": phonenumbers.region_code_for_number(number),
-            "prefix_description": geocoder.description_for_number(number, "zh"),
-            "prefix_carrier": carrier.name_for_number(number, "en"),
-            "time_zones": list(timezone.time_zones_for_number(number)),
-            "number_type": phonenumbers.PhoneNumberType.to_string(phonenumbers.number_type(number)),
-            "search_suggestions": [
-                {"query": f'"{action.value}"', "url": "https://www.google.com/search?" + urlencode({"q": f'"{action.value}"'})},
-                {"query": f'"{action.value}"', "url": "https://www.bing.com/search?" + urlencode({"q": f'"{action.value}"'})},
-            ],
-        }
-        source = f"phonenumbers://{version('phonenumbers')}"
+        data = phone_metadata(action.value)
+        source = f"phonenumbers://{version('phonenumbers')}/phone-metadata/2"
         artifact = self.local_artifact(action, source, data)
         return self.item(action, "phone", "metadata", "号码规则与号段资料；搜索链接为待执行建议",
                          source, [artifact], attributes=data, rule_versions=[source])

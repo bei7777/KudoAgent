@@ -1,3 +1,4 @@
+import phonenumbers
 import pytest
 from pydantic import ValidationError
 from starlette.testclient import TestClient
@@ -56,6 +57,12 @@ def test_prepare_api_is_local_and_does_not_create_research(tmp_path):
         assert response.status_code == 200
         assert response.json()["request"]["budget"]["max_sites"] is None
         assert response.json()["identifiers"] == [{"kind": "username", "value": "sherlock-project"}]
+        mobile = phonenumbers.example_number_for_type("CN", phonenumbers.PhoneNumberType.MOBILE)
+        phone_response = client.post("/api/prepare", json={"clues": str(mobile.national_number)})
+        assert phone_response.status_code == 200
+        assert phone_response.json()["identifiers"] == [{
+            "kind": "phone", "value": phonenumbers.format_number(mobile, phonenumbers.PhoneNumberFormat.E164),
+        }]
         assert client.get("/api/research").json()["total"] == 0
         invalid = client.post("/api/prepare", json={"clues": "sherlock-project\n\nowner@"})
         assert invalid.status_code == 422
@@ -69,3 +76,50 @@ def test_intake_preserves_chinese_and_numeric_usernames():
     assert prepared["identifiers"] == [
         {"kind": "username", "value": "开源中国"}, {"kind": "username", "value": "123456"},
     ]
+
+
+def test_intake_normalizes_chinese_mobile_number_formats_and_deduplicates():
+    mobile = phonenumbers.example_number_for_type("CN", phonenumbers.PhoneNumberType.MOBILE)
+    national = str(mobile.national_number)
+    spaced = phonenumbers.format_number(mobile, phonenumbers.PhoneNumberFormat.NATIONAL)
+    international = phonenumbers.format_number(mobile, phonenumbers.PhoneNumberFormat.E164)
+    values = [national, spaced, spaced.replace(" ", "-"), f"86{national}", f"86 {spaced}",
+              f"86-{spaced.replace(' ', '-')}", international, f"+86 {spaced}"]
+    for value in values:
+        prepared = ResearchIntake.model_validate({"clues": value}).prepare()
+        assert prepared["identifiers"] == [{"kind": "phone", "value": international}]
+        assert "电话号码的号段资料与公开搜索建议" in prepared["request"]["goal"]
+    prepared = ResearchIntake.model_validate({"clues": "\n".join(values)}).prepare()
+    assert prepared["identifiers"] == [{"kind": "phone", "value": international}]
+    assert prepared["lines"] == [{"line": 1, "kind": "phone", "value": international}]
+
+
+@pytest.mark.parametrize("value", ["10000000000", "86 100 0000 0000", "+86 100 0000 0000"])
+def test_intake_reports_invalid_mobile_numbers_on_their_original_line(value):
+    with pytest.raises(ValidationError) as caught:
+        ResearchIntake.model_validate({"clues": f"开源中国\n\n{value}"})
+    error = caught.value.errors()[0]
+    assert error["loc"][:2] == ("clues", 3)
+    assert "号码" in error["msg"] and "无效" in error["msg"]
+
+
+def test_intake_preserves_explicit_numeric_usernames():
+    mobile = phonenumbers.example_number_for_type("CN", phonenumbers.PhoneNumberType.MOBILE)
+    numeric_username = str(mobile.national_number)
+    prepared = ResearchIntake.model_validate({
+        "clues": f"username:{numeric_username}\nUSERNAME:10000000000\nusername:开源中国",
+    }).prepare()
+    assert prepared["identifiers"] == [
+        {"kind": "username", "value": numeric_username},
+        {"kind": "username", "value": "10000000000"},
+        {"kind": "username", "value": "开源中国"},
+    ]
+
+
+def test_intake_requires_explicit_country_prefix_for_international_phone():
+    mobile = phonenumbers.example_number_for_type("GB", phonenumbers.PhoneNumberType.MOBILE)
+    international = phonenumbers.format_number(mobile, phonenumbers.PhoneNumberFormat.E164)
+    prepared = ResearchIntake.model_validate({"clues": international}).prepare()
+    assert prepared["identifiers"] == [{"kind": "phone", "value": international}]
+    with pytest.raises(ValidationError):
+        ResearchIntake.model_validate({"clues": phonenumbers.format_number(mobile, phonenumbers.PhoneNumberFormat.NATIONAL)})

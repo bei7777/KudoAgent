@@ -9,6 +9,7 @@ from kudo_agent.research_agent.planner import DeepSeekToolSchema, ResearchDecisi
 from kudo_agent.research_core.collectors import Collectors
 from kudo_agent.research_core.http import HttpExecutor, validate_public_url
 from kudo_agent.research_core.models import (
+    EMAIL_SITES,
     Action,
     ActionPlan,
     Budget,
@@ -42,9 +43,44 @@ def test_default_scope_contains_all_adapted_sites(catalog):
     assert len(selected) == 8303
     assert len({site.site_id for site in selected}) == len(selected)
     assert {"Zhihu", "Douban", "Gitee", "CSDN"} <= {site.name for site in selected}
-    assert {"cnblogs", "jd", "github"} <= set(request.email_sites)
-    assert len(request.email_sites) == 13
+    assert {"cnblogs", "jd", "github", "gitee", "tencent_cloud"} <= set(request.email_sites)
+    assert request.email_sites == list(EMAIL_SITES)
+    assert len(request.email_sites) == 15
     assert len(catalog.select([], 50)) == 50
+
+
+def test_default_scope_queries_domestic_sites_before_other_regions(catalog):
+    selected = catalog.select([])
+    domestic = [site for site in catalog.sites.values() if site.region == "CN" and site.supported]
+    assert len(selected) == 8303
+    assert len(domestic) == 131
+    assert {site.site_id for site in selected[:len(domestic)]} == {site.site_id for site in domestic}
+    assert all(site.region != "CN" for site in selected[len(domestic):])
+    assert [site.name for site in selected[:8]] == [
+        "Gitee", "CSDN", "Zhihu", "Douban", "Baidu", "v2ex.com", "cnblogs.com", "Juejin",
+    ]
+    assert catalog.select([], 50) == selected[:50]
+    assert all(site.region == "CN" for site in catalog.select([], 50))
+    international = selected[len(domestic):]
+    assert international == sorted(international, key=lambda site: (site.rank, site.site_id))
+    explicit = catalog.select(["GitHub", "Gitee", "Douban"])
+    assert [site.name for site in explicit] == ["GitHub", "Gitee", "Douban"]
+
+
+def test_real_site_input_requirements_remain_visible(catalog):
+    for name in ("Juejin", "NetEase Music"):
+        site = catalog.select([name])[0]
+        assert "数字用户 ID" in site.public()["input_hint"]
+        assert all(not rule.valid_username("公开昵称") for rule in site.rules)
+    bilibili = catalog.select(["Bilibili"])[0]
+    assert not bilibili.supported
+    assert "UID" in bilibili.public()["input_hint"]
+    weibo = catalog.select(["Weibo"])[0]
+    assert not weibo.supported
+    assert "会话激活" in weibo.public()["input_hint"]
+    tiktok = catalog.select(["TikTok"])[0]
+    assert tiktok.region == ""
+    assert not tiktok.matches("抖音")
 
 
 @pytest.mark.parametrize("query,name", [

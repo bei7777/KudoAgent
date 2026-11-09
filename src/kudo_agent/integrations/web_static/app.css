@@ -201,6 +201,23 @@ input.search { width: 280px; max-width: 100%; min-height: 40px; font-size: 13px;
 .evidence-meta { display: flex; flex-wrap: wrap; gap: 8px 20px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 .evidence-card details { margin-top: 16px; }
 .evidence-card details > div { margin-top: 16px; }
+.phone-details { margin: 20px 0; }
+.phone-details > .info-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 32px; }
+.phone-details .info-list dd { font-variant-numeric: tabular-nums; }
+.phone-limits { margin: 16px 0 0; }
+.search-suggestion-list { display: grid; gap: 12px; padding: 0; margin: 16px 0 0; list-style: none; }
+.search-suggestion-list li { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; font-size: 12px; }
+.search-suggestion-list code { font: 12px/1.8 var(--mono), var(--body); color: var(--muted); overflow-wrap: anywhere; }
+.email-progress { margin: 0 0 16px; padding: 16px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.email-progress p { margin-bottom: 12px; }
+.email-progress > :last-child { margin-bottom: 0; }
+.email-scope { font-size: 13px; color: var(--secondary); }
+.email-counts { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-bottom: 12px; color: var(--muted); font-size: 12px; }
+.email-counts strong { margin-left: 8px; color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+.email-failures { display: grid; gap: 16px; padding: 0; margin: 16px 0 0; list-style: none; }
+.email-failures li { font-size: 12px; overflow-wrap: anywhere; }
+.email-failures strong { font-weight: 500; margin-right: 12px; }
+.email-failures p { margin: 4px 0 0; color: var(--muted); }
 .record-list { margin: 12px 0 0; padding-left: 20px; font-size: 12px; overflow-wrap: anywhere; }
 .record-list li { margin-bottom: 8px; }
 .artifact-block { margin-top: 12px; padding: 16px; background: var(--soft); border-radius: 4px; }
@@ -232,6 +249,15 @@ input.search { width: 280px; max-width: 100%; min-height: 40px; font-size: 13px;
 .provider-body > a { font-size: 12px; }
 .provider-check { display: grid; grid-column: 2; gap: 8px; padding-top: 12px; margin-top: 16px; color: var(--muted); font-size: 12px; }
 .provider-check small { font-size: 11px; }
+.domestic-platforms { margin-bottom: 28px; }
+.domestic-platforms h2 { margin-bottom: 8px; font-size: 15px; font-weight: 500; }
+.platform-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 28px; align-items: start; }
+.platform-list details { min-width: 0; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.platform-list summary { color: var(--ink); }
+.platform-list summary small { margin-left: 12px; }
+.platform-list p { margin: 8px 0; font-size: 12px; overflow-wrap: anywhere; }
+.platform-link { font-size: 12px; }
+.provider-body .site-input-hint { color: var(--secondary); font-size: 12px; }
 .catalog-tools { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .catalog-tools p { margin: 0; font-size: 12px; }
 .catalog-controls { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -266,6 +292,7 @@ input.search { width: 280px; max-width: 100%; min-height: 40px; font-size: 13px;
   .detail-grid, .settings-grid { grid-template-columns: 1fr; gap: 24px; }
   .notice { margin: 20px 32px 0; }
   .catalog-tools { flex-wrap: wrap; gap: 16px; }
+  .platform-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 760px) {
@@ -324,6 +351,8 @@ input.search { width: 280px; max-width: 100%; min-height: 40px; font-size: 13px;
   .pagination { gap: 8px; }
   .empty { padding: 32px 8px; }
   .evidence-heading { align-items: flex-start; }
+  .phone-details > .info-list { grid-template-columns: 1fr; }
+  .search-suggestion-list li { grid-template-columns: 1fr; gap: 4px; }
   .directory-stats, .summary-strip { gap: 24px; }
   .metric dd { font-size: 20px; }
 }
@@ -338,6 +367,7 @@ input.search { width: 280px; max-width: 100%; min-height: 40px; font-size: 13px;
   .catalog-controls select { width: 100%; flex-basis: auto; }
   .catalog-controls .search { width: 100%; }
   .notice { margin-right: 16px; margin-left: 16px; }
+  .platform-list { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
