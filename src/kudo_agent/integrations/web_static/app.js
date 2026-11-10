@@ -1,5 +1,5 @@
 const $ = (selector, root = document) => root.querySelector(selector);
-const state = { boot: null, route: 0, poll: null, taskOffset: 0, taskQuery: "", catalogOffset: 0, catalogQuery: "", catalogRegion: "CN", catalogTab: "username", draft: null, resultViews: new Map() };
+const state = { boot: null, route: 0, poll: null, taskOffset: 0, taskQuery: "", catalogOffset: 0, catalogQuery: "", catalogRegion: "CN", emailCatalogQuery: "", emailCatalogRegion: "", catalogTab: "username", draft: null, resultViews: new Map() };
 const labels = {
   queued: "排队中", running: "研究中", completed: "已完成", failed: "执行失败", interrupted: "已中断", cancelled: "已取消",
   detected: "发现记录", not_detected: "未发现记录", metadata: "资料信息", unknown: "无法判定", blocked: "查询受限", rate_limited: "请求限流", unsupported: "暂不支持", connection_failed: "连接失败", user_confirmed: "用户确认", mixed: "样本结果不同",
@@ -360,11 +360,25 @@ async function showCatalog(epoch) {
       class: state.catalogTab === key ? "active" : "", onclick: action(async () => { state.catalogTab = key; await render(); }),
     }, [text, el("span", { class: "tab-count", "aria-hidden": "true" }, count.toLocaleString("zh-CN"))])));
     if (state.catalogTab === "email") {
-      content.replaceChildren(el("div", { class: "provider-grid" }, state.boot.capabilities.email.providers.map(provider => el("article", { class: "panel provider-card" }, [
-        el("div", { class: "provider-heading" }, [el("h3", {}, [provider.name, provider.region === "CN" && el("span", { class: "tag" }, "中国")]), status(provider.last_check.state)]),
-        el("div", { class: "provider-body" }, [el("span", { class: "tag" }, labels[provider.interaction]), el("p", {}, provider.meaning), safeLink(provider.source, "官方来源 ↗")]),
-        el("div", { class: "provider-check" }, [el("span", {}, provider.last_check.observation), el("small", {}, `${provider.last_check.checked_on} · ${provider.last_check.samples} 个自有样本 · 准确率待确认`)]),
-      ]))));
+      const providers = [...state.boot.capabilities.email.providers].sort((a, b) => Number(b.region === "CN") - Number(a.region === "CN"));
+      const input = el("input", { type: "search", class: "search", placeholder: "站点名称或域名", "aria-label": "搜索邮箱站点", value: state.emailCatalogQuery });
+      const region = el("select", { "aria-label": "邮箱站点地区" }, [el("option", { value: "" }, "全部站点"), el("option", { value: "CN" }, "中国站点")]);
+      region.value = state.emailCatalogRegion;
+      const count = el("p", { class: "catalog-result-count", role: "status" }), rows = el("div", { class: "provider-grid" });
+      content.replaceChildren(el("div", { class: "catalog-tools" }, [el("p", { class: "muted" }, `研究默认检查全部 ${providers.length} 个邮箱站点，按国内站点优先执行。`), el("div", { class: "catalog-controls" }, [input, region])]), count, rows);
+      const filter = () => {
+        const terms = state.emailCatalogQuery.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+        const visible = providers.filter(provider => (!state.emailCatalogRegion || provider.region === state.emailCatalogRegion) && terms.every(term => `${provider.name} ${provider.site} ${provider.source}`.toLocaleLowerCase().includes(term)));
+        count.textContent = `显示 ${visible.length} / ${providers.length} 个邮箱站点`;
+        rows.replaceChildren(...(visible.length ? visible.map(provider => el("article", { class: "panel provider-card", "data-site": provider.site }, [
+          el("div", { class: "provider-heading" }, [el("h3", {}, [provider.name, provider.region === "CN" && el("span", { class: "tag" }, "中国")]), status(provider.last_check.state)]),
+          el("div", { class: "provider-body" }, [el("span", { class: "tag" }, labels[provider.interaction]), el("p", {}, provider.meaning), safeLink(provider.source, "官方来源 ↗")]),
+          el("div", { class: "provider-check" }, [el("span", {}, provider.last_check.observation), el("small", {}, `${provider.last_check.checked_on} · ${provider.last_check.samples} 个自有样本 · 准确率待确认`)]),
+        ])) : [empty("未找到对应站点", "可以修改站点名称或切换全部站点浏览。") ]));
+      };
+      input.addEventListener("input", () => { state.emailCatalogQuery = input.value; filter(); });
+      region.addEventListener("change", () => { state.emailCatalogRegion = region.value; filter(); });
+      filter();
       return;
     }
     const input = el("input", { type: "search", class: "search", placeholder: "中文名称、英文名称或域名", "aria-label": "搜索站点名称", value: state.catalogQuery });

@@ -2,12 +2,17 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass, field
+from functools import partial
 from urllib.parse import quote, urljoin, urlsplit
 from uuid import uuid4
 
 from bs4 import BeautifulSoup
 
+from kudo_agent.research_core.email_developer import HANDLERS as DEVELOPER_HANDLERS
+from kudo_agent.research_core.email_domestic import HANDLERS as DOMESTIC_HANDLERS
+from kudo_agent.research_core.email_products import HANDLERS as PRODUCT_HANDLERS
 from kudo_agent.research_core.email_sites import EMAIL_PROVIDERS
+from kudo_agent.research_core.email_social import HANDLERS as SOCIAL_HANDLERS
 from kudo_agent.research_core.http import HttpExecutor
 from kudo_agent.research_core.models import Artifact, RequestSpec
 from kudo_agent.upstream.maigret import detect_error_page
@@ -35,6 +40,10 @@ class EmailCollector:
                     "lastfm": self.lastfm, "freelancer": self.freelancer,
                     "cnblogs": self.cnblogs, "jd": self.jd, "gitee": self.gitee,
                     "tencent_cloud": self.tencent_cloud}
+        handlers.update({name: partial(handler, self) for name, handler in SOCIAL_HANDLERS.items()})
+        handlers.update({name: partial(handler, self) for name, handler in DOMESTIC_HANDLERS.items()})
+        handlers.update({name: partial(handler, self) for name, handler in PRODUCT_HANDLERS.items()})
+        handlers.update({name: partial(handler, self) for name, handler in DEVELOPER_HANDLERS.items()})
         if self.site not in handlers:
             raise ValueError(f"未知邮箱提供方：{self.site}")
         return await handlers[self.site]()

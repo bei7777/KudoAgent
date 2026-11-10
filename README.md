@@ -35,7 +35,7 @@ uv run kudo --env-file .env web
 在浏览器打开 `http://127.0.0.1:8765`。已安装的 wheel 也支持 `kudo --env-file /完整路径/.env web`。通过 `--port 8766` 可以选择其他本机端口。
 
 - 输入线索：首页直接粘贴用户名、主页链接、邮箱、完整电话号码或公共 IP，每行一条，最多 20 条；自动显示类型、合并重复线索，并提示无效输入。中国大陆手机号可直接填写 11 位号码，支持 `86`、`+86`、空格及横线；其他国际号码填写 `+` 和国家代码。数字用户名可添加 `username:` 前缀。研究问题选填，运行预算可以展开调整。
-- 查询范围：根据线索类型执行全部适配规则，用户名查询先执行 131 个国内适配站点，完整范围保留 8,303 个条目；邮箱查询使用全部 15 个已接入站点，无需选择站点。
+- 查询范围：根据线索类型执行全部适配规则，用户名查询先执行 131 个国内适配站点，完整范围保留 8,303 个条目；邮箱查询使用全部 27 个已接入站点，7 个中国站点优先执行，无需选择站点。
 - 发现资料：研究默认打开资料列表，按候选页面、邮箱检查、号码与 IP、待核查和全部记录分类；支持搜索站点、线索、地址或摘要。
 - 核查来源：候选页面按 URL 去重计数，同一页面的多条证据与规则冲突分别保留。展开记录可查看检测规则、关系来源和带 SHA-256 的原始响应，并下载完整资料。
 - 执行记录：查看初始范围、待执行数量、预算、耗时、查询理由和连接失败详情。
@@ -102,7 +102,7 @@ uv run kudo --env-file .env research "公开项目研究" --request-file example
 
 用户名查询默认使用全部 8,303 个已适配目录条目，先执行 131 个国内适配站点。Gitee、CSDN、知乎、豆瓣、百度贴吧、V2EX、博客园与掘金优先排列，初始范围每批执行 50 项；随后由模型安排关联核验。CLI 的 `--site` 和 API 的 `sites` 可用于明确限定查询范围，显式指定的站点按输入顺序执行。Web 新建研究自动采用全部适配站点。目录提供实际输入要求：掘金和网易云音乐需要数字用户 ID，Bilibili 需要带 UID 的完整主页链接，微博保留访客会话限制。抖音、小红书和快手接收完整公开主页链接，采集范围取决于页面公开程度与访问限制；TikTok 使用独立的用户名规则。
 
-邮箱查询提供 `--email` 即可默认查询全部 15 个邮箱站点，`--email-site` 可以限定范围。目前接入中国站点腾讯云（`tencent_cloud`）、Gitee（`gitee`）、博客园（`cnblogs`）、京东（`jd`），以及 GitHub、Pinterest、Spotify、Mozilla、WordPress.com、Gravatar、Duolingo、Replit、Imgur、Last.fm、Freelancer。运行 `uv run kudo email-sites` 查看标识、查询含义与最近实测状态。
+邮箱查询提供 `--email` 即可默认查询全部 27 个邮箱站点，`--email-site` 可以限定范围。中国站点包括腾讯云、华为云、Gitee、坚果云、Zoho 中国站、博客园和京东；其他平台包括 Microsoft、GitHub、X、Adobe、Spotify、Pinterest、WordPress.com、Mozilla、Gravatar、Duolingo、eBay、SoundCloud、Flickr、Replit、Imgur、Last.fm、Freelancer、Plurk、Komoot 和 Internet Archive。运行 `uv run kudo email-sites` 查看标识、查询含义与最近实测状态。Web 目录支持名称搜索和中国站点筛选。
 
 邮箱结果分别展示计划查询数、已返回结果数、连接失败、查询受限、执行失败和待处理数量。一个站点检查多个邮箱时会产生多项查询，站点数量单独去重统计。各站点的交互含义与实测结果见 [邮箱站点](docs/email-providers.md)。
 

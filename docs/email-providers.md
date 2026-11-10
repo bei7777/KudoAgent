@@ -1,17 +1,29 @@
 # 邮箱站点
 
-邮箱采集默认查询全部 15 个邮箱站点，Gitee、腾讯云、博客园与京东优先执行，CLI 与 API 可通过 `email_sites` 限定范围。每个提供方保存交互类型、结果含义、原始响应和规则版本。CLI `kudo email-sites` 与 MCP `list_capabilities` 返回同一份目录，并附带最近验证日期与观察结果。
+邮箱采集默认查询全部 27 个邮箱站点，Gitee、腾讯云、华为云、坚果云、Zoho 中国站、博客园与京东优先执行，CLI 与 API 可通过 `email_sites` 限定范围。每个提供方保存交互类型、结果含义、原始响应和规则版本。CLI `kudo email-sites` 与 MCP `list_capabilities` 返回同一份目录，并附带最近验证日期与观察结果。Web 目录支持名称搜索和中国站点筛选，筛选仅影响目录展示。
 
 ## 接入与实际观察
 
-在 macOS 环境中对两个获授权的自有邮箱执行检查：Gitee 与腾讯云的记录日期为 2026-11-10，其余站点为 2026-11-09。下表记录接口返回；样本的实际账户情况尚未独立确认，准确率保持 `not_established`。公开目录与安装包不包含样本邮箱。
+在 macOS 环境中对两个获授权的自有邮箱执行检查，记录日期为 2026-11-09 至 2026-11-10；每个平台的准确日期由目录中的 `last_check.checked_on` 提供。下表记录接口返回；样本的实际账户情况尚未独立确认，准确率保持 `not_established`。公开目录与安装包不包含样本邮箱。
 
 | 站点标识 | 提供方 | 检查内容 | 两个样本的实际观察 |
 | --- | --- | --- | --- |
 | `gitee` | Gitee | 登录表单的邮箱账户检查 | 两个样本均 HTTP 200；分别返回 `status: 1` 与 `status: 0`，对应 `detected` 与 `not_detected` |
 | `tencent_cloud` | 腾讯云 | 注册表单的邮箱账户检查 | 两个样本均 HTTP 200、`success: 1`；接口允许继续注册，状态为 `not_detected` |
+| `huawei_cloud` | 华为云 | 注册表单的独立邮箱字段校验 | 两个样本均 HTTP 200、`identityUsed: "false"`、`canUse: "true"`，状态为 `not_detected` |
+| `jianguoyun` | 坚果云 | 独立邮箱可用性检查 | 一个样本返回 `isNotReg: true`；另一个在初始化阶段要求人工验证码，状态为 `blocked`，邮箱尚未提交 |
+| `zoho_cn` | Zoho 中国站 | 注册表单的独立邮箱字段校验 | 两个样本均 HTTP 200、`status_code: 201`、`resource_name: signupvalidate`，字段校验通过 |
 | `cnblogs` | 博客园 | 注册表单的独立邮箱字段校验 | HTTP 200、JSON `true`；接口表示可用于注册 |
 | `jd` | 京东 | 注册表单的独立邮箱字段校验 | HTTP 200、`resultCode: 608`；需要有效验证码，状态为 `blocked` |
+| `microsoft` | Microsoft | 身份记录与登录方式查询 | 已取得两个 HTTP 200 响应，分别返回未发现与存在身份记录；后续复测在初始化阶段连接超时，邮箱未提交 |
+| `adobe` | Adobe | 账户类型与登录方式查询 | 两个样本均 HTTP 200、空账户数组，状态为 `not_detected` |
+| `twitter` | X | 独立邮箱可用性检查 | 两个样本均 HTTP 200、`taken: true`，状态为 `detected` |
+| `ebay` | eBay | 登录首步的标识符检查 | 一个样本的字段检查 HTTP 307 指向验证码页面；另一个初始化 HTTP 403，均为 `blocked` |
+| `soundcloud` | SoundCloud | 邮箱标识符状态查询 | 初始化 HTTP 200，检查返回 HTTP 403 和验证码要求，状态为 `blocked` |
+| `flickr` | Flickr | 登录与账户迁移路径查询 | 两个样本均 HTTP 200、`stat: fail`、`code: 11`，账户服务返回应用错误，状态为 `unknown` |
+| `plurk` | Plurk（噗浪） | 注册表单的独立邮箱字段校验 | 两个样本均 HTTP 200、`status: unused`，状态为 `not_detected` |
+| `komoot` | Komoot | 邮箱首步选择登录或注册表单 | 两个样本均 HTTP 200、`type: register`，状态为 `not_detected` |
+| `archive` | Internet Archive | 注册表单的独立邮箱可用性检查 | 两个样本均 HTTP 200、`success: true`，字段校验通过 |
 | `github` | GitHub | 注册表单的邮箱字段校验 | 引导页面 HTTP 403，状态为 `blocked` |
 | `pinterest` | Pinterest | 注册页面的账户存在性查询 | 资源接口 HTTP 403，状态为 `blocked` |
 | `spotify` | Spotify | 注册接口的邮箱字段校验 | 当前网络环境的 TLS 连接失败，任务保存实际错误 |
@@ -38,10 +50,10 @@
 uv run kudo email-sites
 ```
 
-使用本机已设置的 `OWN_EMAIL` 环境变量查询四个中国站点：
+使用本机已设置的 `OWN_EMAIL` 环境变量查询全部邮箱站点：
 
 ```bash
-uv run kudo --env-file .env research "检查我的邮箱在指定站点的注册迹象，逐项说明来源与限制" --email "$OWN_EMAIL" --email-site gitee --email-site tencent_cloud --email-site cnblogs --email-site jd
+uv run kudo --env-file .env research "检查我的邮箱关联资料，逐项说明来源与限制" --email "$OWN_EMAIL"
 ```
 
 MCP 的 `start_research` 接收相同的 `ResearchRequest` 字段，其中 `email_sites` 可填写站点标识。省略该字段或传入空列表时，应用采用全部邮箱查询站点。
@@ -59,6 +71,10 @@ uv run python scripts/probe_email.py --samples private/email-samples.json --samp
 私有查询记录包含响应正文、时间、SHA-256、HTTP 状态和证据；公开验证摘要保存在包内 `research_core/data/email-verification.json`。其中 `last_check` 为带日期的验证快照，当前查询结果以实际响应为准。
 
 ## 接口依据
+
+六个参考项目中，Holehe 提供按站点检查邮箱的功能设计；Sherlock、Maigret 与 Social Analyzer 侧重用户名和公开主页，PhoneInfoga 与 GhostTrack 提供号码或 IP 研究思路。用户名可通过通用主页模板批量建立规则；邮箱需要逐个平台核实账户检查协议、会话初始化、返回字段及交互行为。当前邮箱目录统计已编写并执行过真实检查的提供方，每次查询仍可能遇到访问限制。
+
+新增十二项提供方的当前官方客户端来源、请求结构与判定含义见[邮箱检查协议](email-protocols.md)。平台顺序采用中国站点优先和人工整理的常用平台顺序，不代表网站流量排名。
 
 各适配器独立编写。Holehe 按站点组织账户状态、邮箱字段检查和限流结果的方式用于设计能力；各适配器依据站点公开交互实现，并分别保留存在、未发现、未知、阻断及连接失败。研究依据固定于 `megadose/holehe` 提交 `14da70f588538936b20d238783c5e28a0772a2b3`，涉及 `holehe/modules/software/firefox.py`、`cms/wordpress.py`、`cms/gravatar.py`、`learning/duolingo.py`、`programing/replit.py`、`social_media/imgur.py`、`music/lastfm.py`、`jobs/freelancer.py`。发布包中的实现与规则数据均由本项目独立编写。
 

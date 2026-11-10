@@ -80,9 +80,10 @@ class Budget(Model):
 
 
 EmailSite = Literal[
-    "gitee", "tencent_cloud", "cnblogs", "jd",
-    "github", "pinterest", "spotify", "mozilla", "wordpress", "gravatar",
-    "duolingo", "replit", "imgur", "lastfm", "freelancer",
+    "gitee", "tencent_cloud", "huawei_cloud", "jianguoyun", "zoho_cn", "cnblogs", "jd",
+    "microsoft", "github", "twitter", "adobe", "spotify", "pinterest", "wordpress", "mozilla",
+    "gravatar", "duolingo", "ebay", "soundcloud", "flickr", "replit", "imgur", "lastfm",
+    "freelancer", "plurk", "komoot", "archive",
 ]
 EMAIL_SITES = get_args(EmailSite)
 
