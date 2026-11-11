@@ -1,10 +1,10 @@
 # 邮箱站点
 
-邮箱采集默认查询全部 27 个邮箱站点，Gitee、腾讯云、华为云、坚果云、Zoho 中国站、博客园与京东优先执行，CLI 与 API 可通过 `email_sites` 限定范围。每个提供方保存交互类型、结果含义、原始响应和规则版本。CLI `kudo email-sites` 与 MCP `list_capabilities` 返回同一份目录，并附带最近验证日期与观察结果。Web 目录支持名称搜索和中国站点筛选，筛选仅影响目录展示。
+邮箱采集默认检查全部 100 个查询目标，其中 40 个国内及中文站点优先执行，CLI 与 API 可通过 `email_sites` 限定范围。每个提供方保存交互类型、结果含义、原始响应和规则版本。CLI `kudo email-sites` 与 MCP `list_capabilities` 返回同一份目录，并附带最近验证日期与观察结果。Web 目录支持名称搜索和地区筛选，筛选仅影响目录展示。
 
 ## 接入与实际观察
 
-在 macOS 环境中对两个获授权的自有邮箱执行检查，记录日期为 2026-11-09 至 2026-11-10；每个平台的准确日期由目录中的 `last_check.checked_on` 提供。下表记录接口返回；样本的实际账户情况尚未独立确认，准确率保持 `not_established`。公开目录与安装包不包含样本邮箱。
+在 macOS 环境中对两个获授权的自有邮箱执行检查，记录日期为 2026-11-09 至 2026-11-11；每个平台的准确日期由目录中的 `last_check.checked_on` 提供。下表记录 27 个独立平台接口，另有 [73 个社区目标及实测记录](email-communities.md)。样本的实际账户情况尚未独立确认，准确率保持 `not_established`。公开目录与安装包不包含样本邮箱。
 
 | 站点标识 | 提供方 | 检查内容 | 两个样本的实际观察 |
 | --- | --- | --- | --- |
@@ -74,7 +74,7 @@ uv run python scripts/probe_email.py --samples private/email-samples.json --samp
 
 六个参考项目中，Holehe 提供按站点检查邮箱的功能设计；Sherlock、Maigret 与 Social Analyzer 侧重用户名和公开主页，PhoneInfoga 与 GhostTrack 提供号码或 IP 研究思路。用户名可通过通用主页模板批量建立规则；邮箱需要逐个平台核实账户检查协议、会话初始化、返回字段及交互行为。当前邮箱目录统计已编写并执行过真实检查的提供方，每次查询仍可能遇到访问限制。
 
-新增十二项提供方的当前官方客户端来源、请求结构与判定含义见[邮箱检查协议](email-protocols.md)。平台顺序采用中国站点优先和人工整理的常用平台顺序，不代表网站流量排名。
+独立平台的官方客户端来源、请求结构与判定含义见[邮箱检查协议](email-protocols.md)，共享论坛协议见[社区邮箱检查](email-communities.md)。平台顺序采用国内及中文站点优先和人工整理的常用平台顺序，不代表网站流量排名。
 
 各适配器独立编写。Holehe 按站点组织账户状态、邮箱字段检查和限流结果的方式用于设计能力；各适配器依据站点公开交互实现，并分别保留存在、未发现、未知、阻断及连接失败。研究依据固定于 `megadose/holehe` 提交 `14da70f588538936b20d238783c5e28a0772a2b3`，涉及 `holehe/modules/software/firefox.py`、`cms/wordpress.py`、`cms/gravatar.py`、`learning/duolingo.py`、`programing/replit.py`、`social_media/imgur.py`、`music/lastfm.py`、`jobs/freelancer.py`。发布包中的实现与规则数据均由本项目独立编写。
 

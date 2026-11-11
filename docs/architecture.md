@@ -37,7 +37,7 @@ Sherlock 和 Maigret 规则按站点地址、主页模板和标识符类型归�
 
 邮箱能力参考 Holehe 按站点组织账户状态和字段检查的方式，各适配器依据公开交互独立实现。`email_progress` 从动作记录统计计划、返回、连接失败、阻断、执行失败和待处理数量，站点数按提供方去重；证据中的注册判断、公开头像和公开资料保持各自含义。
 
-邮箱目录包含 27 个提供方，其中 7 个中国站点优先执行。`email.py` 统一管理隔离会话、请求归档与结果结构；`email_domestic.py`、`email_social.py`、`email_products.py` 和 `email_developer.py` 按领域组织新增协议函数。每个函数通过同一个采集器发送请求，使用各自的当前页面配置，并保留全部引导与查询响应。`email_sites.py` 定义查询含义和来源，包内验证快照提供带日期的真实观察；`models.py` 的类型目录限制可执行提供方。每个平台的协议说明见[邮箱检查协议](email-protocols.md)。
+邮箱目录包含 100 个查询目标，其中 40 个国内及中文站点优先执行。`email.py` 统一管理隔离会话、请求归档与结果结构；`email_domestic.py`、`email_social.py`、`email_products.py` 和 `email_developer.py` 按领域组织协议函数，`email_communities.py` 提供 Discuz、MyBB 和 Discourse 的公共字段检查协议及 73 个独立社区目标。每个函数通过同一个采集器发送请求，保留全部引导与查询响应。社区字段请求终止自动跳转，避免将字段跟随页面迁移自动转交其他地址。`email_sites.py` 定义查询含义和来源，包内验证快照提供带日期的真实观察；`models.py` 的类型目录限制可执行提供方。每个平台的协议说明见[邮箱检查协议](email-protocols.md)与[社区邮箱检查](email-communities.md)。
 
 号码能力参考 PhoneInfoga 对本地资料与搜索建议的区分，以及 GhostTrack 的 phonenumbers 本地处理方式。`application/intake.py` 识别中国大陆手机号并规范化为 E164；`phone_metadata()` 提供号段资料与 `not_executed` 搜索建议，查询建议不产生网络请求。`phone_mentions()` 使用成熟号码匹配库在已采集的正文与 `tel:` 链接中查找已知号码，并保存准确匹配的上下文和来源。该关联表达页面包含号码，不确认号码持有人或当前通信状态。
 

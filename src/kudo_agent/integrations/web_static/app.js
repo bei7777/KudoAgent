@@ -362,10 +362,10 @@ async function showCatalog(epoch) {
     if (state.catalogTab === "email") {
       const providers = [...state.boot.capabilities.email.providers].sort((a, b) => Number(b.region === "CN") - Number(a.region === "CN"));
       const input = el("input", { type: "search", class: "search", placeholder: "站点名称或域名", "aria-label": "搜索邮箱站点", value: state.emailCatalogQuery });
-      const region = el("select", { "aria-label": "邮箱站点地区" }, [el("option", { value: "" }, "全部站点"), el("option", { value: "CN" }, "中国站点")]);
+      const region = el("select", { "aria-label": "邮箱站点地区" }, [el("option", { value: "" }, "全部站点"), el("option", { value: "CN" }, "国内及中文站点")]);
       region.value = state.emailCatalogRegion;
       const count = el("p", { class: "catalog-result-count", role: "status" }), rows = el("div", { class: "provider-grid" });
-      content.replaceChildren(el("div", { class: "catalog-tools" }, [el("p", { class: "muted" }, `研究默认检查全部 ${providers.length} 个邮箱站点，按国内站点优先执行。`), el("div", { class: "catalog-controls" }, [input, region])]), count, rows);
+      content.replaceChildren(el("div", { class: "catalog-tools" }, [el("p", { class: "muted" }, `默认检查全部 ${providers.length} 个目标，国内及中文站点优先。目录展示实测结果，部分站点的邮箱占用状态仍为未知。`), el("div", { class: "catalog-controls" }, [input, region])]), count, rows);
       const filter = () => {
         const terms = state.emailCatalogQuery.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
         const visible = providers.filter(provider => (!state.emailCatalogRegion || provider.region === state.emailCatalogRegion) && terms.every(term => `${provider.name} ${provider.site} ${provider.source}`.toLocaleLowerCase().includes(term)));

@@ -84,6 +84,16 @@ EmailSite = Literal[
     "microsoft", "github", "twitter", "adobe", "spotify", "pinterest", "wordpress", "mozilla",
     "gravatar", "duolingo", "ebay", "soundcloud", "flickr", "replit", "imgur", "lastfm",
     "freelancer", "plurk", "komoot", "archive",
+    "21ic", "52pojie", "a9vg", "elecfans", "enshan", "erji", "hostloc", "kafan",
+    "keylol", "mountblade", "mydigit", "newwise", "rd16", "asus52", "znds", "firebbs",
+    "hasscn", "openedv", "tsdm", "eefocus", "biosmods", "blitzortung", "jellyfin", "mybb",
+    "ocaml", "nextpvr", "clashfarmer", "thecardboard", "biotech", "appinn", "asktug",
+    "oceanbase", "haskell", "trae", "marginnote", "susecn", "nvidiacn", "jittor", "openubmc",
+    "ranchercn", "quectelcn", "ruyisdk", "d2l", "python", "julia", "ubuntu", "nixos",
+    "homeassistant", "openwrt", "huggingface", "pytorch", "elastic", "gradle", "arduino",
+    "freecodecamp", "rubyonrails", "django", "hashicorp", "kubernetes", "discourse", "rust",
+    "swift", "kotlin", "golang", "gnome", "kde", "fedora", "nextcloud", "syncthing", "godot",
+    "blender", "joplin", "obsidian",
 ]
 EMAIL_SITES = get_args(EmailSite)
 

@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from bs4 import BeautifulSoup
 
+from kudo_agent.research_core.email_communities import COMMUNITIES, community
 from kudo_agent.research_core.email_developer import HANDLERS as DEVELOPER_HANDLERS
 from kudo_agent.research_core.email_domestic import HANDLERS as DOMESTIC_HANDLERS
 from kudo_agent.research_core.email_products import HANDLERS as PRODUCT_HANDLERS
@@ -44,6 +45,7 @@ class EmailCollector:
         handlers.update({name: partial(handler, self) for name, handler in DOMESTIC_HANDLERS.items()})
         handlers.update({name: partial(handler, self) for name, handler in PRODUCT_HANDLERS.items()})
         handlers.update({name: partial(handler, self) for name, handler in DEVELOPER_HANDLERS.items()})
+        handlers.update({name: partial(community, self) for name in COMMUNITIES})
         if self.site not in handlers:
             raise ValueError(f"未知邮箱提供方：{self.site}")
         return await handlers[self.site]()

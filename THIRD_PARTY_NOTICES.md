@@ -15,10 +15,12 @@ Sherlock 版权所有 © 2019 Sherlock Project。Maigret 版权所有 © 2020–
 
 Social Analyzer 的多信号核验、Holehe 的按站点检查账户状态与邮箱字段、PhoneInfoga 的号码资料与查询建议、GhostTrack 的本地号码处理及 IP 查询为功能设计参考。对应实现依据功能规格和公开接口独立编写。
 
-邮箱适配器与验证摘要由本项目编写。Holehe 功能研究固定于提交 `14da70f588538936b20d238783c5e28a0772a2b3`；其 GPL 代码及规则数据没有进入发布包。27 个邮箱提供方依据公开接口文档和当前官方客户端的接口声明独立实现。具体接口依据和测试范围见 [邮箱站点](docs/email-providers.md)及[检查协议](docs/email-protocols.md)。
+邮箱适配器与验证摘要由本项目编写。Holehe 功能研究固定于提交 `14da70f588538936b20d238783c5e28a0772a2b3`；其 GPL 代码及规则数据没有进入发布包。100 个邮箱查询目标依据公开接口文档、当前官方客户端及社区系统的字段接口行为独立实现。Discuz、MyBB 和 Discourse 的源码用于核实协议；适配器通过独立的数据模型、请求执行和解析函数实现。具体依据见[邮箱站点](docs/email-providers.md)、[检查协议](docs/email-protocols.md)与[社区邮箱检查](docs/email-communities.md)。
 
 PhoneInfoga 的功能研究基于提交 `55807b05b753dab7bc6fe67403ca385668dda179`，涉及 `lib/remote/local_scanner.go` 与 `lib/remote/googlesearch_scanner.go`。GhostTrack 的功能研究基于提交 `a5cb8ad4c08acd803f166fb067b7dac724d6cb3d`，涉及 `GhostTR.py` 的 `phoneGW()`。本项目使用 phonenumbers 独立实现号码格式、号段资料和页面提及匹配，并独立生成百度、Google 与 Bing 搜索建议。
 
 ## 依赖
+
+`defusedxml 0.7.1` 采用 Python Software Foundation License，用于解析 Discuz XML 响应并拒绝实体扩展和外部实体；许可证随该依赖分发。
 
 `socid-extractor` 采用 MIT，`phonenumbers` 采用 Apache-2.0。[chompjs](https://github.com/Nykakin/chompjs) 采用 MIT，用于读取官方页面的 JavaScript 配置对象；[Esprima Python](https://github.com/Kronuz/esprima-python) 采用 BSD-2-Clause，用于解析字段校验页面的 JavaScript 语法树。[Tree-sitter Python](https://github.com/tree-sitter/py-tree-sitter) 与 [JavaScript 语法模块](https://github.com/tree-sitter/tree-sitter-javascript) 采用 MIT，用于解析包含现代 JavaScript 语法的官方客户端配置。解析器只读取页面配置。其余依赖及准确版本记录于 `uv.lock`，各依赖保留自身许可。项目安装包通过依赖声明安装这些组件。

@@ -4,6 +4,7 @@ from importlib.resources import files
 
 from pydantic import StrictBool, model_validator
 
+from kudo_agent.research_core.email_communities import COMMUNITIES
 from kudo_agent.research_core.models import EMAIL_SITES, EmailSite, Identifier, Model
 
 
@@ -72,6 +73,15 @@ EMAIL_PROVIDERS = {
     "freelancer": EmailProvider("Freelancer", "registration_check", "https://www.freelancer.com/signup",
                                 "用户字段检查接口返回的邮箱可用性"),
 }
+
+EMAIL_PROVIDERS.update({
+    key: EmailProvider(site.name, "registration_check", site.url,
+                       {"discuz": "社区邮箱字段校验；区分已占用、校验通过与邮箱限制",
+                        "mybb": "社区邮箱字段校验；字段可用时仍保留账户注册状态未知",
+                        "discourse": "社区邮箱字段校验；未公开占用状态的站点返回未知"}[site.engine],
+                       region=site.region)
+    for key, site in COMMUNITIES.items()
+})
 
 
 def email_capabilities() -> list[dict]:

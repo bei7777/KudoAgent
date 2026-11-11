@@ -17,7 +17,8 @@ def test_web_assets_and_real_capabilities(tmp_path):
         assert data["model_configured"] is False
         assert "api_key" not in data
         providers = data["capabilities"]["email"]["providers"]
-        assert len(providers) == len(EMAIL_SITES) == 27
+        assert len(providers) == len(EMAIL_SITES) == 100
+        assert sum(provider["region"] == "CN" for provider in providers) == 40
         assert {provider["site"] for provider in providers} == set(EMAIL_SITES)
         assert {"Gitee", "腾讯云", "博客园", "京东"} <= {
             provider["name"] for provider in providers if provider["region"] == "CN"

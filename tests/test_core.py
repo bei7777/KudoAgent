@@ -45,7 +45,7 @@ def test_default_scope_contains_all_adapted_sites(catalog):
     assert {"Zhihu", "Douban", "Gitee", "CSDN"} <= {site.name for site in selected}
     assert {"cnblogs", "jd", "github", "gitee", "tencent_cloud"} <= set(request.email_sites)
     assert request.email_sites == list(EMAIL_SITES)
-    assert len(request.email_sites) == 27
+    assert len(request.email_sites) == 100
     assert {"huawei_cloud", "jianguoyun", "zoho_cn", "microsoft", "adobe", "twitter",
             "ebay", "soundcloud", "flickr", "plurk", "komoot", "archive"} <= set(request.email_sites)
     assert len(catalog.select([], 50)) == 50

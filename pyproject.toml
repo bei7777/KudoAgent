@@ -13,6 +13,7 @@ license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 dependencies = [
   "beautifulsoup4>=4.13,<5",
   "chompjs>=1.4,<2",
+  "defusedxml>=0.7,<1",
   "email-validator>=2.2,<3",
   "esprima>=4,<5",
   "filelock>=3.18,<4",
