@@ -39,11 +39,11 @@
 | 预算与模型记录 | 中断的规划调用计入次数预算；恢复后保留已保存耗时；原始模型请求、返回和服务端 token 用量持久化 |
 | 构建 | wheel 与源码分发包构建成功，包含规则、来源记录和许可证 |
 | 独立安装 | wheel 安装至干净 Python 环境后，包从 `site-packages` 加载；规则、来源记录、完整许可、CLI、官方 MCP 客户端读取 9 个工具与 Web 页面资源检查均通过 |
-| 跨系统构建与安装 | 提交 `b9644ff` 的 GitHub Actions 在 macOS、Linux、Windows 均通过静态检查、测试、构建和独立安装验证；每个平台 71 项测试通过，21 项依赖私有采集记录的测试跳过，对应存档测试已经在本机通过 |
+| 跨系统构建与安装 | 提交 `821974a` 的 GitHub Actions 在 macOS、Linux、Windows 均通过静态检查、测试、构建和独立安装验证；每个平台 72 项测试通过，94 项依赖私有采集记录的测试跳过，对应存档测试已经在本机通过 |
 
 本地运行记录保存在 Git 忽略目录 `.runtime/`。`email100-all-tests.xml` 保存 166 项本地测试结果，`email-catalog-result.json` 保存 100 项邮箱目录的真实浏览器检查，`email100-checks/` 保存社区的真实字段检查；`china-final-browser/results.json` 保存真实浏览器流程的两项研究标识与检查结果，`china-ui-result.json` 和 `email-ui-result.json` 保存国内目录、号码与邮箱页面的布局检查；`all-scope-live.xml` 保存完整范围持久化、真实模型研究、MCP 取消恢复与三种进程中断恢复的 6 项通过记录；`domestic-profile-checks/` 保存国内公开主页查询资料；`domestic-verification/` 保存 Gitee 查询记录与模型报告；`comparison-results.xml` 保存两次实际采集的比较结果。公开网络测试保留默认 20 秒请求期限，执行结果受当前网络连接与站点响应影响。
 
-三种操作系统的构建与安装结果见 [GitHub Actions 验证记录](https://github.com/bei7777/KudoAgent/actions/runs/42753081714)。100 项邮箱目录的独立安装环境为 `.runtime/email100-install/`，验证命令为 `scripts/verify_install.py .runtime/email100-install-check`，检查包内规则与许可资源、100 项邮箱目录、Web 页面以及 MCP 9 个工具。
+三种操作系统的构建与安装结果见 [GitHub Actions 验证记录](https://github.com/bei7777/KudoAgent/actions/runs/42986499287)。100 项邮箱目录的 wheel 已安装至 `.runtime/email100-install/` 干净环境，`scripts/verify_install.py` 通过包内规则与许可资源、100 项邮箱目录、Web 页面以及 MCP 9 个工具的检查，验证数据位于 `.runtime/email100-install-check/`。
 
 完整目录测试验证了规则加载、初始范围和持久化。实际网络验证覆盖本页记录中的具体站点；8,303 项规则尚未逐项完成在线有效性测量。
 
