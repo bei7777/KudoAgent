@@ -77,6 +77,16 @@ def test_direct_page_can_belong_to_a_named_platform_without_username_lookup(cata
         resolve_sites(catalog, bind_goal_site(catalog, request))
 
 
+def test_structured_request_keeps_named_restrictions(catalog):
+    request = ResearchRequest(goal="查看项目的公开主页", goal_sites=["GitHub", "Gitee"],
+                              identifiers=[Identifier(kind="username", value="sherlock-project")])
+    assert len(resolve_sites(catalog, bind_goal_site(catalog, request)).usernames) == 2
+    with pytest.raises(ValueError, match="名单"):
+        bind_goal_site(catalog, request.model_copy(update={"goal": "只查 GitHub"}))
+    with pytest.raises(ValueError, match="GitHuub"):
+        bind_goal_site(catalog, request.model_copy(update={"goal_sites": ["GitHuub"]}))
+
+
 async def test_saved_platform_list_and_legacy_restriction(catalog, store):
     request = ResearchRequest(goal="只查 GitHub 和 Gitee", site_categories=["technology"],
                               identifiers=[Identifier(kind="username", value="sherlock-project")])

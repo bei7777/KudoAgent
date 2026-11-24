@@ -27,7 +27,7 @@ def bind_goal_site(catalog: Catalog, request: ResearchRequest) -> ResearchReques
     clauses = list(PLATFORM_CLAUSE.finditer(request.goal))
     kinds = {item.kind for item in request.identifiers}
     selected = {}
-    if clauses and (not kinds or kinds & {"username", "email", "profile"}):
+    if (clauses or request.goal_sites) and (not kinds or kinds & {"username", "email", "profile"}):
         known = {name for site in catalog.sites.values() for name in site_names(site)}
         known.update(name.casefold() for site, provider in EMAIL_PROVIDERS.items() for name in (site, provider.name))
         for clause in clauses:
@@ -47,6 +47,13 @@ def bind_goal_site(catalog: Catalog, request: ResearchRequest) -> ResearchReques
                     selected.setdefault(key, name)
                 else:
                     raise ValueError(f"目录中找不到研究问题指定的站点“{name}”，请核对平台名称。")
+        if request.goal_sites:
+            supplied = {name.casefold(): name for name in request.goal_sites}
+            for key in supplied.keys() - known:
+                raise ValueError(f"目录中找不到研究问题指定的站点“{supplied[key]}”，请核对平台名称。")
+            if selected and selected.keys() != supplied.keys():
+                raise ValueError("提交的平台名单与研究问题指定的平台不一致，请核对查询范围。")
+            selected = selected or supplied
     names = list(selected.values())
     return request.model_copy(update={"goal_sites": names, "goal_site": names[0] if len(names) == 1 else None})
 
