@@ -33,7 +33,7 @@ async def test_real_mcp_research_cancel_resume(tmp_path):
                 while True:
                     result = await client.call_tool("get_status", {"run_id": run_id})
                     progress = result.structured_content
-                    assert progress["status"] not in {"failed", "interrupted", "completed"}, progress
+                    assert progress["status"] in {"queued", "running"}, progress
                     if progress["evidence_count"]:
                         break
                     await asyncio.sleep(0.05)
@@ -56,7 +56,7 @@ async def test_real_mcp_research_cancel_resume(tmp_path):
                 while True:
                     result = await client.call_tool("get_status", {"run_id": run_id})
                     progress = result.structured_content
-                    assert progress["status"] not in {"failed", "interrupted", "cancelled"}, progress
+                    assert progress["status"] in {"queued", "running", "completed"}, progress
                     if progress["status"] == "completed":
                         break
                     await asyncio.sleep(0.1)

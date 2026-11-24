@@ -10,6 +10,8 @@ import phonenumbers
 from email_validator import validate_email
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from kudo_agent.research_core.site_categories import SiteCategory
+
 
 def timestamp() -> str:
     return datetime.now(UTC).isoformat()
@@ -79,6 +81,17 @@ class Budget(Model):
     max_response_bytes: int = Field(default=4_000_000, ge=1024, le=20_000_000)
 
 
+class BudgetIncrease(Model):
+    additional_seconds: float = Field(default=0, ge=0, le=86400)
+    additional_requests: int = Field(default=0, ge=0, le=1_000_000)
+
+    @model_validator(mode="after")
+    def positive_increase(self):
+        if not self.additional_seconds and not self.additional_requests:
+            raise ValueError("请填写需要追加的运行时间或请求次数")
+        return self
+
+
 EmailSite = Literal[
     "gitee", "tencent_cloud", "huawei_cloud", "jianguoyun", "zoho_cn", "cnblogs", "jd",
     "microsoft", "github", "twitter", "adobe", "spotify", "pinterest", "wordpress", "mozilla",
@@ -98,21 +111,62 @@ EmailSite = Literal[
 EMAIL_SITES = get_args(EmailSite)
 
 
-class ResearchRequest(Model):
-    goal: str = Field(min_length=1, max_length=8000)
-    identifiers: list[Identifier] = Field(default_factory=list, max_length=20)
+class ResearchScope(Model):
+    follow_profile_links: bool | None = None
+    goal_site: str | None = Field(default=None, min_length=1, max_length=80)
+    goal_sites: list[str] = Field(default_factory=list)
+    site_categories: list[SiteCategory] | None = Field(default=None, min_length=1)
     sites: list[str] = Field(default_factory=list, max_length=100_000)
     email_sites: list[EmailSite] = Field(default_factory=lambda: list(EMAIL_SITES), max_length=len(EMAIL_SITES))
     budget: Budget = Field(default_factory=Budget)
+
+    @model_validator(mode="after")
+    def read_saved_goal_sites(self):
+        if self.goal_site:
+            if self.goal_sites and self.goal_sites != [self.goal_site]:
+                raise ValueError("保存的单平台与多平台范围不一致")
+            self.goal_sites = [self.goal_site]
+        return self
+
+
+class ResearchRequest(ResearchScope):
+    goal: str = Field(min_length=1, max_length=8000)
+    identifiers: list[Identifier] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def profile_link_budget(self):
+        if any(item.kind != "profile" for item in self.identifiers):
+            self.follow_profile_links = None
+            return self
+        explicit_depth = "max_depth" in self.budget.model_fields_set
+        if self.follow_profile_links is None and not explicit_depth:
+            # 自然语言任务在识别线索前也要保留用户尚未开启外链查询的选择。
+            self.follow_profile_links = False
+        if self.identifiers and self.follow_profile_links is False:
+            self.budget = self.budget.model_copy(update={"max_depth": 0})
+        elif self.follow_profile_links is True and not self.budget.max_depth:
+            raise ValueError("核查页面外链时，关联扩展层数至少为 1")
+        return self
+
+    @property
+    def requires_model(self) -> bool:
+        return not self.identifiers or any(identifier.kind != "phone" for identifier in self.identifiers)
 
 
 class RunStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
+    PARTIAL = "partial"
     FAILED = "failed"
     INTERRUPTED = "interrupted"
     CANCELLED = "cancelled"
+
+
+class BudgetStop(StrEnum):
+    REQUESTS = "网络请求数量已达到预算"
+    PLANNING = "模型决策轮数已达到预算"
+    TIME = "研究运行期限已经耗尽"
 
 
 class Action(Model):
@@ -180,9 +234,15 @@ class Evidence(Model):
     attributes: dict[str, Any] = Field(default_factory=dict)
     relations: list[Relation] = Field(default_factory=list)
 
+    def public_record(self) -> dict:
+        record = self.model_dump()
+        if self.kind == "email":
+            record["attributes"]["source_role"] = "check_endpoint"
+        return record
+
 
 class Claim(Model):
-    text: str = Field(min_length=1, max_length=4000)
+    text: str = Field(min_length=1, max_length=4100)
     evidence_ids: list[str] = Field(min_length=1)
     conflicting_evidence_ids: list[str] = Field(default_factory=list)
 
@@ -190,6 +250,7 @@ class Claim(Model):
 class ReportDraft(Model):
     claims: list[Claim]
     next_actions: list[str]
+    evidence_review_version: Literal[1] | None = None
 
 
 class RequestSpec(Model):

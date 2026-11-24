@@ -1,3 +1,4 @@
+import asyncio
 import json
 from importlib.metadata import metadata
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -5,9 +6,65 @@ from urllib.parse import parse_qs, unquote, urlsplit
 import phonenumbers
 import pytest
 
+from kudo_agent.application.config import Settings
+from kudo_agent.application.service import Application
 from kudo_agent.research_core.collectors import Collectors, phone_mentions, phone_metadata
 from kudo_agent.research_core.http import HttpExecutor
 from kudo_agent.research_core.models import Action, Identifier, ResearchRequest
+
+
+async def test_local_phone_research_can_resume_and_export_without_a_model(tmp_path):
+    identifiers = []
+    for region, kind in (("CN", phonenumbers.PhoneNumberType.MOBILE),
+                         ("CH", phonenumbers.PhoneNumberType.FIXED_LINE)):
+        number = phonenumbers.example_number_for_type(region, kind)
+        identifiers.append(Identifier(kind="phone", value=phonenumbers.format_number(
+            number, phonenumbers.PhoneNumberFormat.E164)))
+    request = ResearchRequest(goal="核查号码号段资料及使用限制", identifiers=identifiers)
+    settings = Settings(data_dir=tmp_path)
+    async with Application(settings) as app:
+        run_id = app.start_research(request)["run_id"]
+        async with asyncio.timeout(10):
+            while app.get_status(run_id)["coverage"]["checked"] < len(identifiers):
+                await asyncio.sleep(0)
+        saved_evidence = app.store.evidence(run_id)
+        app.cancel_research(run_id)
+        with pytest.raises(asyncio.CancelledError):
+            await app.wait(run_id)
+        assert app.get_status(run_id)["status"] == "cancelled"
+    async with Application(settings) as app:
+        app.resume_research(run_id)
+        status = await app.wait(run_id)
+        assert status["status"] == "completed" and status["coverage"]["checked"] == 2
+        assert status["request_count"] == status["model_usage"]["attempts"] == 0
+        report = app.get_report(run_id, "json")
+        assert app.store.evidence(run_id) == saved_evidence
+        assert all(artifact["method"] == "LOCAL" for artifact in report["artifacts"])
+        assert {item["subject"] for item in report["evidence"]} == {item.value for item in identifiers}
+        claims = report["report"]["claims"]
+        for item in report["evidence"]:
+            assert any(claim["evidence_ids"] == [item["evidence_id"]]
+                       and item["subject"] in claim["text"]
+                       and item["attributes"]["country_name"] in claim["text"] for claim in claims)
+        markdown = app.get_report(run_id)
+        assert "持有人和实时位置均未核实" in markdown
+        assert markdown == (app.store.run_dir(run_id) / "report.md").read_text(encoding="utf-8")
+        for item in report["evidence"]:
+            assert f'(#e-{item["evidence_id"]})' in markdown
+
+
+def test_empty_and_mixed_identifier_inputs_still_require_model_configuration(tmp_path):
+    phone = phonenumbers.example_number("CH")
+    identifier = Identifier(kind="phone", value=phonenumbers.format_number(phone, phonenumbers.PhoneNumberFormat.E164))
+    app = Application(Settings(data_dir=tmp_path))
+    try:
+        for identifiers in ([], [identifier, Identifier(kind="username", value="sherlock-project")]):
+            request = ResearchRequest(goal=f"核对 {identifier.value} 的公开资料", identifiers=identifiers)
+            with pytest.raises(ValueError, match="缺少模型配置"):
+                app.start_research(request)
+        assert app.list_research()["total"] == 0
+    finally:
+        app.store.close()
 
 
 @pytest.mark.parametrize("region,number_type,engines", [

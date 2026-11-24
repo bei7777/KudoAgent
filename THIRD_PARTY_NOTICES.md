@@ -21,6 +21,8 @@ PhoneInfoga 的功能研究基于提交 `55807b05b753dab7bc6fe67403ca385668dda17
 
 ## 依赖
 
+`langsmith 0.14.17` 采用 MIT 许可证。KudoAgent 使用其 `tracing_context` 在本机号码研究期间关闭追踪。该发行版的 `langsmith-0.14.17.dist-info/licenses/LICENSE` 载明 `Copyright 2026 langChain`。分发该组件的副本或实质部分时，须保留其版权与许可声明。
+
 `defusedxml 0.7.1` 采用 Python Software Foundation License，用于解析 Discuz XML 响应并拒绝实体扩展和外部实体；许可证随该依赖分发。
 
 `socid-extractor` 采用 MIT，`phonenumbers` 采用 Apache-2.0。[chompjs](https://github.com/Nykakin/chompjs) 采用 MIT，用于读取官方页面的 JavaScript 配置对象；[Esprima Python](https://github.com/Kronuz/esprima-python) 采用 BSD-2-Clause，用于解析字段校验页面的 JavaScript 语法树。[Tree-sitter Python](https://github.com/tree-sitter/py-tree-sitter) 与 [JavaScript 语法模块](https://github.com/tree-sitter/tree-sitter-javascript) 采用 MIT，用于解析包含现代 JavaScript 语法的官方客户端配置。解析器只读取页面配置。其余依赖及准确版本记录于 `uv.lock`，各依赖保留自身许可。项目安装包通过依赖声明安装这些组件。

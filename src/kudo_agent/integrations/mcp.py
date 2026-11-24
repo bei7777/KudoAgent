@@ -9,7 +9,8 @@ from mcp.types import CallToolResult, TextContent
 
 from kudo_agent.application.config import Settings
 from kudo_agent.application.service import Application
-from kudo_agent.research_core.models import ResearchRequest
+from kudo_agent.research_core.models import BudgetIncrease, ResearchRequest
+from kudo_agent.research_core.site_categories import SiteCategory
 
 
 def explain_input_errors(function):
@@ -33,14 +34,16 @@ def create_server(settings: Settings) -> MCPServer:
 
     server = MCPServer(
         "KudoAgent", version="0.1.0", lifespan=lifespan,
-        instructions="研究任务后台执行；使用 get_status 查询，完成后使用 get_report。默认查询全部适配规则，coverage 返回初始范围的执行进度。",
+        instructions="使用 get_status 查询后台任务。completed 表示执行完成，partial 表示预算用完，"
+                     "两种状态均可用 get_report 读取结果。coverage 记录初始范围，can_resume 表示是否可以恢复。",
     )
 
     @server.tool(structured_output=True)
     @explain_input_errors
-    async def list_capabilities(offset: int = 0, limit: int = 50, query: str = "", region: str = "") -> dict[str, Any]:
+    async def list_capabilities(offset: int = 0, limit: int = 50, query: str = "", region: str = "",
+                                categories: list[SiteCategory] | None = None) -> dict[str, Any]:
         """查询输入能力、站点目录和接口行为。"""
-        return services["application"].list_capabilities(offset, limit, query, region)
+        return services["application"].list_capabilities(offset, limit, query, region, categories=categories)
 
     @server.tool(structured_output=True)
     @explain_input_errors
@@ -62,8 +65,11 @@ def create_server(settings: Settings) -> MCPServer:
 
     @server.tool()
     @explain_input_errors
-    async def get_report(run_id: str, format: Literal["markdown", "json"] = "markdown") -> CallToolResult:
-        """读取经过引用检查的研究报告。"""
+    async def get_report(run_id: str, format: Literal["markdown", "json"] = "markdown", retry: bool = False) -> CallToolResult:
+        """读取研究报告；retry=true 根据已有证据重新生成，随后可查询进度。"""
+        if retry:
+            result = services["application"].retry_report(run_id)
+            return CallToolResult(content=[TextContent(type="text", text=json.dumps(result))], structured_content=result)
         result = services["application"].get_report(run_id, format)
         if isinstance(result, str):
             return CallToolResult(content=[TextContent(type="text", text=result)])
@@ -78,8 +84,12 @@ def create_server(settings: Settings) -> MCPServer:
 
     @server.tool(structured_output=True)
     @explain_input_errors
-    async def resume_research(run_id: str, retry_interrupted_accounts: bool = False) -> dict[str, Any]:
+    async def resume_research(run_id: str, retry_interrupted_accounts: bool = False,
+                              additional_seconds: float = 0, additional_requests: int = 0) -> dict[str, Any]:
         """恢复任务；未确认完成的账户请求需要明确指定重新执行。"""
+        if additional_seconds or additional_requests:
+            return services["application"].extend_budget(run_id, BudgetIncrease(
+                additional_seconds=additional_seconds, additional_requests=additional_requests))
         return services["application"].resume_research(run_id, retry_interrupted_accounts)
 
     @server.tool(structured_output=True)

@@ -1,7 +1,9 @@
+import asyncio
 import os
 import sys
 from pathlib import Path
 
+import phonenumbers
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -38,3 +40,49 @@ async def test_real_stdio_server(tmp_path):
             missing_configuration = await client.call_tool("start_research", {"request": {"goal": "检查配置"}})
             assert missing_configuration.is_error
             assert "KUDO" in str(missing_configuration.content)
+
+            sample = phonenumbers.format_number(
+                phonenumbers.example_number("CH"), phonenumbers.PhoneNumberFormat.E164
+            )
+            started = await client.call_tool("start_research", {"request": {
+                "goal": "查询号码的号段资料", "identifiers": [{"kind": "phone", "value": sample}],
+            }})
+            assert not started.is_error
+            run_id = started.structured_content["run_id"]
+            async with asyncio.timeout(20):
+                while True:
+                    result = await client.call_tool("get_status", {"run_id": run_id})
+                    assert not result.is_error
+                    if result.structured_content["status"] not in {"queued", "running"}:
+                        break
+                    await asyncio.sleep(0.05)
+            assert result.structured_content["status"] == "completed"
+            assert result.structured_content["model_usage"]["attempts"] == 0
+            assert result.structured_content["request_count"] == 0
+            report = await client.call_tool("get_report", {"run_id": run_id, "format": "json"})
+            assert not report.is_error
+            evidence = report.structured_content["evidence"]
+            assert len(evidence) == 1 and evidence[0]["subject"] == sample
+            claims = report.structured_content["report"]["claims"]
+            assert any(evidence[0]["evidence_id"] in claim["evidence_ids"] for claim in claims)
+            limited = await client.call_tool("start_research", {"request": {
+                "goal": "整理号码资料", "identifiers": [{"kind": "phone", "value": sample}],
+                "budget": {"run_timeout": 0.000001},
+            }})
+            partial_id = limited.structured_content["run_id"]
+            async with asyncio.timeout(20):
+                while True:
+                    state = (await client.call_tool("get_status", {"run_id": partial_id})).structured_content
+                    if state["status"] == "partial":
+                        break
+                    await asyncio.sleep(0.05)
+            assert state["can_extend_budget"]
+            resumed = await client.call_tool("resume_research", {"run_id": partial_id, "additional_seconds": 5})
+            assert not resumed.is_error and resumed.structured_content["run_id"] == partial_id
+            async with asyncio.timeout(20):
+                while True:
+                    state = (await client.call_tool("get_status", {"run_id": partial_id})).structured_content
+                    if state["status"] == "completed":
+                        break
+                    await asyncio.sleep(0.05)
+            assert state["report_status"] == "ready" and state["request_count"] == 0

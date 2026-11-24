@@ -9,6 +9,8 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 from bs4 import BeautifulSoup
 
+from kudo_agent.application.config import Settings
+from kudo_agent.application.service import Application
 from kudo_agent.evidence.store import Store
 from kudo_agent.research_core.email import EmailCollector
 from kudo_agent.research_core.email_communities import (
@@ -59,6 +61,33 @@ def community_store(tmp_path_factory):
         yield store
     finally:
         store.close()
+
+
+async def test_saved_email_evidence_links_to_archived_responses(community_store):
+    row = community_store.db.execute(
+        "SELECT run_id, id FROM evidence WHERE json_extract(payload,'$.kind')='email' "
+        "AND json_array_length(payload,'$.artifact_ids')>=2 LIMIT 1"
+    ).fetchone()
+    assert row is not None
+    run_id, evidence_id = row
+    async with Application(Settings(data_dir=community_store.root)) as app:
+        page = app.get_evidence(run_id, evidence_id=evidence_id)
+        record = page["items"][0]
+        assert record["attributes"]["source_role"] == "check_endpoint"
+        artifacts = page["artifacts"]
+        assert any(artifact["url"] == record["source_url"] for artifact in artifacts)
+        assert record["source_url"] not in app.confirmation_sources(run_id)
+        with pytest.raises(ValueError, match="确认关系"):
+            await app.record_confirmation(run_id, record["source_url"], record["source_url"], "核对来源用途")
+        markdown = app.get_report(run_id)
+        assert f"检测请求地址 `{record['source_url']}`" in markdown
+        assert "已保存的检测响应" in markdown
+        for artifact in artifacts:
+            metadata, body = app.get_artifact(run_id, artifact["artifact_id"])
+            assert hashlib.sha256(body).hexdigest() == metadata.sha256
+            assert f"]({metadata.body_path})" in markdown
+        report = app.get_report(run_id, "json")
+        assert record in report["evidence"]
 
 
 @pytest.mark.parametrize("site", list(COMMUNITIES))

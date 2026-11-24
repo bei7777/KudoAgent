@@ -12,7 +12,7 @@ from kudo_agent.application.config import Settings
 from kudo_agent.application.service import Application
 from kudo_agent.integrations.web import create_web_app
 from kudo_agent.research_agent.planner import Planner
-from kudo_agent.research_core.models import Identifier, ResearchRequest
+from kudo_agent.research_core.models import EMAIL_SITES, BudgetIncrease, Identifier, ResearchRequest
 
 cli = typer.Typer(help="KudoAgent：公开足迹核验", pretty_exceptions_show_locals=False)
 console = Console()
@@ -44,6 +44,8 @@ def research(
     ip: Annotated[list[str] | None, typer.Option()] = None,
     site: Annotated[list[str] | None, typer.Option()] = None,
     email_site: Annotated[list[str] | None, typer.Option(help="可选的邮箱范围限制；默认全部站点")] = None,
+    category: Annotated[list[str] | None, typer.Option(help="按站点类别筛选，可重复指定")] = None,
+    follow_profile_links: Annotated[bool, typer.Option("--follow-profile-links", help="继续核查指定主页中的外链")] = False,
 ):
     if request_file:
         request = ResearchRequest.model_validate_json(request_file.read_text(encoding="utf-8"))
@@ -51,14 +53,18 @@ def research(
         identifiers = [Identifier(kind=kind, value=value) for kind, values in
                        (("username", username), ("profile", profile), ("email", email), ("phone", phone), ("ip", ip))
                        for value in (values or [])]
-        request = ResearchRequest(goal=goal, identifiers=identifiers, sites=site or [], email_sites=email_site or [])
+        request = ResearchRequest(goal=goal, identifiers=identifiers, sites=site or [],
+                                  email_sites=email_site or list(EMAIL_SITES), site_categories=category or None,
+                                  follow_profile_links=True if follow_profile_links else None)
 
     async def execute():
         async with Application(ctx.obj) as app:
             started = app.start_research(request)
             output(started)
             output(await app.wait(started["run_id"]))
-            console.print(str(app.store.run_dir(started["run_id"]) / "report.md"))
+            report_path = app.store.run_dir(started["run_id"]) / "report.md"
+            if report_path.is_file():
+                console.print(str(report_path))
 
     asyncio.run(execute())
 
@@ -71,13 +77,15 @@ def read_command(settings: Settings, operation):
 
 
 @cli.command()
-def sites(ctx: typer.Context, query: str = "", offset: int = 0, limit: int = 50, region: str = ""):
-    output(read_command(ctx.obj, lambda app: app.list_capabilities(offset, limit, query, region)))
+def sites(ctx: typer.Context, query: str = "", offset: int = 0, limit: int = 50, region: str = "",
+          category: Annotated[list[str] | None, typer.Option(help="限定站点类别，可以重复指定")] = None):
+    output(read_command(ctx.obj, lambda app: app.list_capabilities(offset, limit, query, region, categories=category)))
 
 
 @cli.command("email-sites")
-def email_sites(ctx: typer.Context):
-    output(read_command(ctx.obj, lambda app: app.list_capabilities(limit=1)["email"]))
+def email_sites(ctx: typer.Context,
+                category: Annotated[list[str] | None, typer.Option(help="限定站点类别，可以重复指定")] = None):
+    output(read_command(ctx.obj, lambda app: app.list_capabilities(limit=1, categories=category)["email"]))
 
 
 @cli.command()
@@ -91,8 +99,15 @@ def evidence(ctx: typer.Context, run_id: str, offset: int = 0, limit: int = 50):
 
 
 @cli.command()
-def report(ctx: typer.Context, run_id: str, format: str = "markdown", destination: Path | None = None):
-    result = read_command(ctx.obj, lambda app: app.get_report(run_id, format))
+def report(ctx: typer.Context, run_id: str, format: str = "markdown", destination: Path | None = None,
+           retry: Annotated[bool, typer.Option(help="仅从已有证据重新生成报告")] = False):
+    async def execute():
+        async with Application(ctx.obj) as app:
+            if retry:
+                app.retry_report(run_id)
+                await app.report_tasks[run_id]
+            return app.get_report(run_id, format)
+    result = asyncio.run(execute())
     text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, indent=2)
     if destination:
         destination.write_text(text, encoding="utf-8")
@@ -106,10 +121,15 @@ def cancel(ctx: typer.Context, run_id: str):
 
 
 @cli.command()
-def resume(ctx: typer.Context, run_id: str, retry_interrupted_accounts: bool = False):
+def resume(ctx: typer.Context, run_id: str, retry_interrupted_accounts: bool = False,
+           additional_seconds: float = 0, additional_requests: int = 0):
     async def execute():
         async with Application(ctx.obj) as app:
-            output(app.resume_research(run_id, retry_interrupted_accounts))
+            if additional_seconds or additional_requests:
+                output(app.extend_budget(run_id, BudgetIncrease(additional_seconds=additional_seconds,
+                                                               additional_requests=additional_requests)))
+            else:
+                output(app.resume_research(run_id, retry_interrupted_accounts))
             output(await app.wait(run_id))
     asyncio.run(execute())
 

@@ -1,13 +1,14 @@
 import asyncio
 import logging
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 from urllib.parse import urlsplit
 
 from langgraph.graph import END, START, StateGraph
 
-from kudo_agent.evidence.report import evidence_context, validate_draft
+from kudo_agent.evidence.report import evidence_context
 from kudo_agent.evidence.store import Store
 from kudo_agent.research_agent.planner import Planner
+from kudo_agent.research_agent.reporting import generate_report
 from kudo_agent.research_core.catalog import Catalog
 from kudo_agent.research_core.collectors import Collectors
 from kudo_agent.research_core.email_sites import EMAIL_PROVIDERS
@@ -15,12 +16,14 @@ from kudo_agent.research_core.http import QueryConnectionError, QueryTargetBlock
 from kudo_agent.research_core.models import (
     Action,
     ActionPlan,
+    BudgetStop,
     Identifier,
     PlannedAction,
-    ReportDraft,
     RequestBudgetExceeded,
     ResearchRequest,
+    RunStatus,
 )
+from kudo_agent.research_core.scope import resolve_sites
 from kudo_agent.upstream.maigret import make_profile_url_regexp
 
 logger = logging.getLogger(__name__)
@@ -31,11 +34,18 @@ class State(TypedDict):
     round: int
     selected: list[str]
     stop_reason: str
+    budget_exhausted: NotRequired[bool]
 
 
 class Workflow:
-    def __init__(self, store: Store, catalog: Catalog, planner: Planner, collectors: Collectors):
-        self.store, self.catalog, self.planner, self.collectors = store, catalog, planner, collectors
+    def __init__(self, store: Store, catalog: Catalog, planner: Planner | None, collectors: Collectors):
+        self.store, self.catalog, self._planner, self.collectors = store, catalog, planner, collectors
+
+    @property
+    def planner(self) -> Planner:
+        if self._planner is None:
+            raise RuntimeError("本机号码研究无法发起模型调用")
+        return self._planner
 
     def request(self, run_id: str) -> ResearchRequest:
         return ResearchRequest.model_validate(self.store.run(run_id)["request"])
@@ -53,46 +63,47 @@ class Workflow:
         run_id = state["run_id"]
         request = self.request(run_id)
         if not request.identifiers:
-            request.identifiers = await self.planner.extract_input(request.goal)
+            identifiers = await self.planner.extract_input(request.goal)
+            request = ResearchRequest.model_validate(request.model_dump() | {"identifiers": identifiers})
             self.store.update(run_id, request=request.model_dump_json())
-        sites = self.catalog.select(request.sites, request.budget.max_sites)
+        scope = resolve_sites(self.catalog, request)
         actions = []
         for identifier in request.identifiers:
             if identifier.kind == "username":
-                actions += [Action(capability="username", value=identifier.value, site=s.site_id) for s in sites]
+                actions += [Action(capability="username", value=identifier.value, site=s.site_id) for s in scope.usernames]
             elif identifier.kind == "email":
-                if not request.email_sites:
-                    raise ValueError("邮箱查询必须明确指定 email_sites")
-                actions += [Action(capability="email", value=identifier.value, site=s) for s in request.email_sites]
+                actions += [Action(capability="email", value=identifier.value, site=s) for s in scope.emails]
             else:
                 actions.append(Action(capability=identifier.kind, value=identifier.value))
         self.store.add_actions(run_id, sorted(
             actions, key=lambda action: self.initial_priority(action, bool(request.sites))
         ))
-        return {"round": 0, "selected": [], "stop_reason": ""}
+        return {"round": state.get("round", 0), "selected": [], "stop_reason": "", "budget_exhausted": False}
 
     async def plan(self, state: State):
         run_id, number = state["run_id"], state["round"]
         request = self.request(run_id)
         pending = self.store.actions(run_id, "pending")
         if not pending:
-            return {"selected": [], "stop_reason": "没有可执行的新线索"}
+            reason = "已完成本机号码资料核查" if self._planner is None else "没有可执行的新线索"
+            return {"selected": [], "stop_reason": reason}
         saved = self.store.decision(run_id, number)
         attempts = self.store.model_usage(run_id)["planning_attempts"]
         if self.store.run(run_id)["request_count"] >= request.budget.max_requests:
-            return {"selected": [], "stop_reason": "网络请求数量已达到预算"}
+            return {"selected": [], "stop_reason": BudgetStop.REQUESTS.value, "budget_exhausted": True}
         # 全部初始查询按持久化顺序执行，关联扩展再由模型安排。
         initial = [row for row in pending if row["payload"]["depth"] == 0][:50]
         if not saved and initial:
             plan = ActionPlan(source="catalog", stop_reason="", actions=[PlannedAction(
                 action_id=row["id"], question=f"核查 {row['payload']['value']} 的公开记录",
-                reason="执行默认查询范围中的初始查询，保留该站点的实际响应与检测结果",
+                reason="读取本机号码分配规则" if row["payload"]["capability"] == "phone" else
+                       "执行初始范围内的查询，保存站点响应与检测结果",
                 evidence_ids=[],
             ) for row in initial])
             self.store.save_decision(run_id, number, plan.model_dump())
             return {"selected": [action.action_id for action in plan.actions], "stop_reason": ""}
         if not saved and attempts >= request.budget.max_rounds:
-            return {"selected": [], "stop_reason": "模型决策轮数已达到预算"}
+            return {"selected": [], "stop_reason": BudgetStop.PLANNING.value, "budget_exhausted": True}
         items = self.store.evidence(run_id)
         # 候选分组进入模型上下文，完整队列保存在任务数据库。
         offered = pending[:100]
@@ -123,8 +134,12 @@ class Workflow:
             async with limit:
                 self.store.action_status(run_id, action_id, "running")
                 action = Action.model_validate(record["payload"])
+                if self._planner is None and action.capability != "phone":
+                    raise ValueError("本机号码研究只能执行号码资料查询")
                 try:
                     results = await self.collectors.collect(action)
+                except RequestBudgetExceeded:
+                    raise
                 except (QueryConnectionError, QueryTargetBlocked) as error:
                     status = "blocked" if isinstance(error, QueryTargetBlocked) else "unreachable"
                     self.store.action_status(run_id, action_id, status, str(error))
@@ -146,13 +161,16 @@ class Workflow:
         if exhausted:
             for record in self.store.actions(run_id, "running"):
                 self.store.action_status(run_id, record["id"], "interrupted", "网络请求预算已耗尽")
-            return {"round": state["round"] + 1, "selected": [], "stop_reason": "网络请求预算已耗尽"}
+            return {"round": state["round"] + 1, "selected": [], "stop_reason": BudgetStop.REQUESTS.value,
+                    "budget_exhausted": True}
         self.discover(run_id, set(state["selected"]))
         return {"round": state["round"] + 1, "selected": []}
 
     def discover(self, run_id: str, action_ids: set[str] | None = None):
         request = self.request(run_id)
-        sites = self.catalog.select(request.sites, request.budget.max_sites)
+        if not request.budget.max_depth:
+            return
+        sites = resolve_sites(self.catalog, request).usernames
         records = {a["id"]: Action.model_validate(a["payload"]) for a in self.store.actions(run_id)}
         actions = []
         for item in self.store.evidence(run_id):
@@ -173,29 +191,22 @@ class Workflow:
                             continue
                         match = make_profile_url_regexp(site.template).fullmatch(link.rstrip("/"))
                         if match:
-                            identifier = Identifier(kind="username", value=match.group("_maigret_username"))
                             actions.append(Action(capability="profile", value=link, depth=parent.depth + 1,
                                                   parent_evidence=[item.evidence_id]))
+                            if request.follow_profile_links:
+                                break
+                            identifier = Identifier(kind="username", value=match.group("_maigret_username"))
                             actions.extend(Action(capability="username", value=identifier.value, site=s.site_id,
                                                   depth=parent.depth + 1, parent_evidence=[item.evidence_id]) for s in sites)
         self.store.add_actions(run_id, actions)
 
     async def report(self, state: State):
         run_id = state["run_id"]
-        self.store.verify(run_id)
-        items = self.store.evidence(run_id)
-        draft = ReportDraft(claims=[], next_actions=[])
-        for offset in range(0, len(items), 50):
-            part = await self.planner.report({
-                "goal": self.request(run_id).goal, "stop_reason": state["stop_reason"],
-                "evidence": evidence_context(items[offset:offset + 50]),
-            })
-            validate_draft(part, items[offset:offset + 50])
-            draft.claims.extend(part.claims)
-            draft.next_actions.extend(part.next_actions)
-        draft.next_actions = list(dict.fromkeys(draft.next_actions))
-        validate_draft(draft, items)
-        self.store.update(run_id, report=draft.model_dump_json(), stop_reason=state["stop_reason"])
+        reason = state["stop_reason"]
+        exhausted = (state["budget_exhausted"] if "budget_exhausted" in state
+                     else self.store.legacy_budget_stop(run_id, reason))
+        self.store.begin_report(run_id, RunStatus.PARTIAL if exhausted else RunStatus.COMPLETED, reason)
+        await generate_report(self.store, run_id, self._planner)
         return {}
 
     def compile(self, checkpointer):

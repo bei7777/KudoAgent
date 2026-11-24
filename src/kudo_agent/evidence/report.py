@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from kudo_agent.evidence.store import Store
-from kudo_agent.research_core.models import Evidence, ReportDraft
+from kudo_agent.research_core.models import Claim, Evidence, ReportDraft
 
 
 def evidence_context(items: list[Evidence]) -> list[dict]:
@@ -24,6 +24,35 @@ def validate_draft(draft: ReportDraft, items: list[Evidence]):
             raise ValueError("报告包含不存在的证据引用")
 
 
+def local_phone_report(items: list[Evidence]) -> ReportDraft:
+    claims = []
+    for item in items:
+        if item.kind == "confirmation":
+            claims.append(Claim(text=f"用户确认：{item.summary}", evidence_ids=[item.evidence_id]))
+            continue
+        if item.kind != "phone":
+            raise ValueError("本机号码报告只接受号码资料和用户确认")
+        data = item.attributes
+        fields = [
+            ("国家或地区", data.get("country_name") or data.get("region")),
+            ("号段地区", data.get("prefix_description")),
+            ("号段原始运营商", data.get("prefix_carrier")),
+            ("号码类型", data.get("number_type")),
+        ]
+        facts = [f"{label}为 {value}" for label, value in fields if value]
+        if "valid_range" in data:
+            facts.append("符合分配号段规则" if data["valid_range"] else "未通过分配号段校验")
+        summary = "，".join(facts) if facts else item.summary
+        claims.append(Claim(text=f"号码 {item.subject} 的本机记录显示，{summary}。", evidence_ids=[item.evidence_id]))
+    phone_ids = [item.evidence_id for item in items if item.kind == "phone"]
+    if phone_ids:
+        claims.append(Claim(
+            text="号段资料反映号码分配时的记录。号码当前的运营商、启用状态、持有人和实时位置均未核实。搜索建议尚未执行。",
+            evidence_ids=phone_ids,
+        ))
+    return ReportDraft(claims=claims, next_actions=[], evidence_review_version=1)
+
+
 def render(store: Store, run_id: str, draft: ReportDraft | None = None) -> str:
     store.verify(run_id)
     run, items = store.run(run_id), store.evidence(run_id)
@@ -33,13 +62,19 @@ def render(store: Store, run_id: str, draft: ReportDraft | None = None) -> str:
         validate_draft(draft, items)
     model_usage = store.model_usage(run_id)
     coverage = store.coverage(run_id)
+    progress = store.report_progress(run_id)
     lines = ["# 公开足迹核验报告", "", run["request"]["goal"], "",
              f"研究标识：`{run_id}`", f"状态：`{run['status']}`", f"网络请求：{run['request_count']}",
              f"模型调用：{model_usage['attempts']}；已返回的 token 用量：{model_usage['total_tokens']}",
              f"初始查询范围：{coverage['planned']} 项；已返回结果：{coverage['checked']} 项；"
              f"连接失败：{coverage['failed']} 项；查询受限：{coverage['blocked']} 项；待执行：{coverage['remaining']} 项",
-             f"停止原因：{run['stop_reason'] or run['error'] or '研究仍在进行'}", "", "## 研究结论", ""]
+             f"停止原因：{run['stop_reason'] or run['error'] or '研究仍在进行'}"]
+    if progress["status"] == "failed":
+        lines.append(f"报告生成失败：{progress['error']}")
+    lines.extend(["", "## 研究结论", ""])
     if draft:
+        if draft.evidence_review_version is None:
+            lines.extend(["此报告采用旧版结论格式。可从任务详情重新生成报告并核对已有证据。", ""])
         for claim in draft.claims:
             citations = " ".join(f"[证据 {eid[:10]}](#e-{eid})" for eid in claim.evidence_ids)
             lines.append(f"- {claim.text} {citations}")
@@ -47,20 +82,21 @@ def render(store: Store, run_id: str, draft: ReportDraft | None = None) -> str:
                 lines.append("  冲突来源：" + " ".join(
                     f"[证据 {eid[:10]}](#e-{eid})" for eid in claim.conflicting_evidence_ids))
     else:
-        lines.append("模型报告尚未生成，已采集资料见证据记录。")
+        lines.append("报告尚未生成，已采集资料见证据记录。")
     lines += ["", "## 证据记录", ""]
     artifacts = {artifact.artifact_id: artifact for artifact in store.artifacts(run_id)}
     for item in items:
+        source = f"检测请求地址 `{item.source_url}`" if item.kind == "email" else f"来源：{item.source_url}"
         lines += [f'<a id="e-{item.evidence_id}"></a>', f"### {item.summary}", "",
                   f"标识符：`{item.subject}`；状态：`{item.state}`；获取时间：{item.observed_at}",
-                  f"来源：{item.source_url}", ""]
+                  source, ""]
         for finding in item.detections:
             lines.append(f"- `{finding.rule_id}`：{finding.state}；{finding.reason}")
         if item.relations:
             lines += ["", "关联记录：", ""]
             for relation in item.relations:
                 lines.append(f"- `{relation.kind}`：{relation.source} → {relation.target}")
-        lines += ["", "原始资料：", ""]
+        lines += ["", "已保存的检测响应" if item.kind == "email" else "原始资料：", ""]
         for identifier in item.artifact_ids:
             artifact = artifacts[identifier]
             lines.append(f"- [{identifier[:10]}]({artifact.body_path})：{artifact.method}；"
@@ -122,8 +158,8 @@ def compare(store: Store, previous: str, current: str) -> dict:
             category = "changed"
         else:
             category = "unchanged"
-        categories[category].append({"action_id": action_id, "previous": old.model_dump() if old else None,
-                                     "current": new.model_dump() if new else None,
+        categories[category].append({"action_id": action_id, "previous": old.public_record() if old else None,
+                                     "current": new.public_record() if new else None,
                                      "failure": failures.get(action_id, "")})
     return {"previous": previous, "current": current, "changes": categories}
 

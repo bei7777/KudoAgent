@@ -6,7 +6,7 @@ from starlette.testclient import TestClient
 from kudo_agent.application.config import Settings
 from kudo_agent.application.intake import ResearchIntake
 from kudo_agent.integrations.web import create_web_app
-from kudo_agent.research_core.models import EMAIL_SITES, Budget, ResearchRequest
+from kudo_agent.research_core.models import EMAIL_SITES, Budget, Identifier, ResearchRequest
 
 
 def test_intake_recognizes_and_normalizes_real_identifier_formats():
@@ -37,6 +37,44 @@ def test_intake_preserves_physical_lines_and_deduplicates():
     assert prepared["request"]["budget"]["max_depth"] == 0
 
 
+def test_prepare_preserves_an_existing_research_scope(tmp_path):
+    request = ResearchRequest(
+        goal="核查 Sherlock 项目的 GitHub 主页",
+        identifiers=[Identifier(kind="username", value="sherlock-project")],
+        sites=["GitHub"], email_sites=["github"], budget=Budget(max_sites=1, max_depth=0),
+    )
+    with TestClient(create_web_app(Settings(data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
+        client.headers["X-Kudo-Token"] = client.get("/api/bootstrap").json()["token"]
+        intake = request.model_dump(exclude={"identifiers"}) | {"clues": "username:sherlock-project"}
+        response = client.post("/api/prepare", json=intake)
+        assert response.status_code == 200
+        assert response.json()["request"] == request.model_dump()
+        site = response.json()["username_sites"][0]
+        assert site["name"] == "GitHub"
+        assert site["id"] != site["name"]
+        assert client.get("/api/research").json()["total"] == 0
+
+
+def test_web_scope_preview_uses_the_catalog_and_preserves_selection_order(tmp_path):
+    with TestClient(create_web_app(Settings(data_dir=tmp_path)), base_url="http://127.0.0.1") as client:
+        client.headers["X-Kudo-Token"] = client.get("/api/bootstrap").json()["token"]
+        sites = []
+        for name in ("GitHub", "Gitee"):
+            catalog = client.get("/api/capabilities", params={"query": name, "supported_only": True}).json()
+            assert all(site["supported"] for site in catalog["sites"])
+            sites.append(next(site["site_id"] for site in catalog["sites"] if site["name"] == name))
+        selection = {"clues": "sherlock-project", "sites": sites, "email_sites": ["github", "gitee"]}
+        prepared = client.post("/api/prepare", json=selection)
+        assert prepared.status_code == 200
+        assert prepared.json()["request"]["sites"] == sites
+        assert prepared.json()["request"]["email_sites"] == ["github", "gitee"]
+        limited = client.post("/api/prepare", json=selection | {"budget": {"max_sites": 1}})
+        assert limited.status_code == 400
+        unknown = client.post("/api/prepare", json=selection | {"sites": [""]})
+        assert unknown.status_code == 400
+        assert client.get("/api/research").json()["total"] == 0
+
+
 @pytest.mark.parametrize("value", [
     "https:/github.com/sherlock-project", "www.github.com/sherlock-project", "https://", "https:////github.com",
     "https://owner:password@github.com/", "file:///etc/passwd", "owner@@github.com",
@@ -56,10 +94,12 @@ def test_prepare_api_is_local_and_does_not_create_research(tmp_path):
         response = client.post("/api/prepare", json={"clues": "sherlock-project"})
         assert response.status_code == 200
         assert response.json()["request"]["budget"]["max_sites"] is None
+        assert response.json()["requires_model"] is True
         assert response.json()["identifiers"] == [{"kind": "username", "value": "sherlock-project"}]
         mobile = phonenumbers.example_number_for_type("CN", phonenumbers.PhoneNumberType.MOBILE)
         phone_response = client.post("/api/prepare", json={"clues": str(mobile.national_number)})
         assert phone_response.status_code == 200
+        assert phone_response.json()["requires_model"] is False
         assert phone_response.json()["identifiers"] == [{
             "kind": "phone", "value": phonenumbers.format_number(mobile, phonenumbers.PhoneNumberFormat.E164),
         }]

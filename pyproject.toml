@@ -21,6 +21,7 @@ dependencies = [
   "langchain-core>=1,<2",
   "langgraph>=1,<2",
   "langgraph-checkpoint-sqlite>=3,<4",
+  "langsmith>=0.14.9,<1",
   "mcp>=2,<3",
   "openai>=2,<3",
   "phonenumbers>=9,<10",

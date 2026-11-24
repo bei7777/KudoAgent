@@ -22,7 +22,11 @@ from kudo_agent.application.intake import ResearchIntake
 from kudo_agent.application.service import Application
 from kudo_agent.research_agent.planner import Planner
 from kudo_agent.research_core.domestic import DOMESTIC_PLATFORMS
-from kudo_agent.research_core.models import Budget, Model, ResearchRequest
+from kudo_agent.research_core.email_sites import EMAIL_PROVIDERS
+from kudo_agent.research_core.goal_scope import bind_goal_site
+from kudo_agent.research_core.models import Budget, BudgetIncrease, Model, ResearchRequest
+from kudo_agent.research_core.scope import resolve_sites
+from kudo_agent.research_core.site_categories import SiteCategory
 
 
 class PageQuery(Model):
@@ -33,6 +37,12 @@ class PageQuery(Model):
 
 class CatalogQuery(PageQuery):
     region: Literal["", "CN"] = ""
+    supported_only: bool = False
+    categories: list[SiteCategory] | None = None
+
+
+class HistoryQuery(PageQuery):
+    brief: bool = False
 
 
 class EvidenceQuery(PageQuery):
@@ -112,25 +122,69 @@ async def bootstrap(request):
 
 
 async def capabilities(request):
-    query = CatalogQuery.model_validate(dict(request.query_params))
+    params = dict(request.query_params)
+    if "categories" in params:
+        params["categories"] = request.query_params.getlist("categories")
+    query = CatalogQuery.model_validate(params)
     return JSONResponse(service(request).list_capabilities(**query.model_dump()))
 
 
 async def prepare(request):
     payload = await read_body(request, ResearchIntake)
-    return JSONResponse(payload.prepare())
+    result = payload.prepare()
+    try:
+        catalog = service(request).catalog
+        prepared = bind_goal_site(catalog, ResearchRequest.model_validate(result["request"]))
+        scope = resolve_sites(catalog, prepared)
+    except ValueError as error:
+        return JSONResponse({"error": str(error), "scope_field": "site_categories" if payload.site_categories else "sites"},
+                            status_code=400)
+    result["scope"] = scope.counts()
+    result["request"] = prepared.model_dump()
+    result["goal_site"] = prepared.goal_site
+    result["goal_sites"] = prepared.goal_sites
+    if prepared.goal_sites:
+        result["goal_scope"] = {
+            "username": [site.name for site in scope.usernames],
+            "email": [EMAIL_PROVIDERS[site].name for site in scope.emails],
+        }
+    if payload.sites:
+        selected = catalog.select(payload.sites)
+        result["username_sites"] = [{"id": site.site_id, "name": site.name} for site in selected]
+    return JSONResponse(result)
 
 
 async def researches(request):
     if request.method == "POST":
         payload = await read_body(request, ResearchRequest)
         return JSONResponse(service(request).start_research(payload), status_code=202)
-    query = PageQuery.model_validate(dict(request.query_params))
+    query = HistoryQuery.model_validate(dict(request.query_params))
     return JSONResponse(service(request).list_research(**query.model_dump()))
 
 
 async def research(request):
-    return JSONResponse(service(request).get_research(run_id(request)))
+    return JSONResponse(service(request).get_research(run_id(request),
+                        include_timeline=request.query_params.get("timeline") != "false"))
+
+
+async def progress(request):
+    app = service(request)
+    identifier = run_id(request)
+    return JSONResponse(app.get_status(identifier, include_usage=False) | {
+        "uncertain_accounts": len(app.store.uncertain_requests(identifier)),
+    })
+
+
+async def execution(request):
+    return JSONResponse(service(request).execution_summary(run_id(request)))
+
+
+async def report_summary(request):
+    return JSONResponse(service(request).report_summary(run_id(request)))
+
+
+async def confirmation_sources(request):
+    return JSONResponse({"urls": service(request).confirmation_sources(run_id(request))})
 
 
 async def evidence(request):
@@ -169,6 +223,16 @@ async def cancel(request):
 async def resume(request):
     payload = await read_body(request, ResumeRequest)
     return JSONResponse(service(request).resume_research(run_id(request), payload.retry_interrupted_accounts), status_code=202)
+
+
+async def retry_report(request):
+    await read_body(request, Model)
+    return JSONResponse(service(request).retry_report(run_id(request)), status_code=202)
+
+
+async def extend_budget(request):
+    increase = await read_body(request, BudgetIncrease)
+    return JSONResponse(service(request).extend_budget(run_id(request), increase), status_code=202)
 
 
 async def confirmation(request):
@@ -214,11 +278,17 @@ def create_web_app(settings: Settings) -> Starlette:
         Route("/api/prepare", prepare, methods=["POST"]),
         Route("/api/research", researches, methods=["GET", "POST"]),
         Route("/api/research/{run_id:uuid}", research),
+        Route("/api/research/{run_id:uuid}/progress", progress),
+        Route("/api/research/{run_id:uuid}/execution", execution),
+        Route("/api/research/{run_id:uuid}/report/summary", report_summary),
+        Route("/api/research/{run_id:uuid}/confirm/sources", confirmation_sources),
         Route("/api/research/{run_id:uuid}/evidence", evidence),
         Route("/api/research/{run_id:uuid}/report", report),
         Route("/api/research/{run_id:uuid}/artifacts/{artifact_id}", artifact),
         Route("/api/research/{run_id:uuid}/cancel", cancel, methods=["POST"]),
         Route("/api/research/{run_id:uuid}/resume", resume, methods=["POST"]),
+        Route("/api/research/{run_id:uuid}/report/retry", retry_report, methods=["POST"]),
+        Route("/api/research/{run_id:uuid}/budget", extend_budget, methods=["POST"]),
         Route("/api/research/{run_id:uuid}/confirm", confirmation, methods=["POST"]),
         Route("/api/compare/{previous:uuid}/{current:uuid}", comparison),
         Route("/api/doctor", doctor, methods=["POST"]),

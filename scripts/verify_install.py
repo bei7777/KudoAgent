@@ -41,6 +41,11 @@ async def main():
         assert prepared.json()["identifiers"][0]["kind"] == "profile"
         assert prepared.json()["request"]["sites"] == []
         assert prepared.json()["request"]["goal"]
+        assert prepared.json()["request"]["budget"]["max_depth"] == 0
+        selected = client.post("/api/prepare", json={
+            "clues": "sherlock-project", "goal": "只查 GitHub 和 Gitee", "site_categories": ["technology"],
+        })
+        assert selected.status_code == 200 and selected.json()["scope"]["username_sites"] == 2
         domestic = client.get("/api/capabilities", params={"query": "知乎", "region": "CN"}).json()
         assert any(site["name"] == "Zhihu" and "知乎" in site["aliases"] for site in domestic["sites"])
     async with Application(Settings(data_dir=data_dir / "application")) as app:

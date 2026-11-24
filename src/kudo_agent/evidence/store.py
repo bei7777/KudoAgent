@@ -6,10 +6,13 @@ import sqlite3
 from pathlib import Path
 from uuid import UUID, uuid4
 
+from kudo_agent.evidence.browse import create_browse_indexes
 from kudo_agent.research_core.models import (
     Action,
     Artifact,
+    BudgetStop,
     Evidence,
+    ReportDraft,
     RequestBudgetExceeded,
     ResearchRequest,
     RunStatus,
@@ -66,16 +69,60 @@ class Store:
                 finished_at TEXT, request TEXT NOT NULL, response TEXT,
                 error TEXT NOT NULL DEFAULT ''
             );
+            CREATE TABLE IF NOT EXISTS report_progress (
+                run_id TEXT PRIMARY KEY REFERENCES runs(id), status TEXT NOT NULL, error TEXT NOT NULL,
+                collection_status TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS budget_extensions (
+                run_id TEXT NOT NULL REFERENCES runs(id), revision INTEGER NOT NULL, first_round INTEGER NOT NULL,
+                budget TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (run_id, revision)
+            );
+            CREATE TABLE IF NOT EXISTS scope_counts (
+                run_id TEXT PRIMARY KEY REFERENCES runs(id), username_sites INTEGER NOT NULL, email_sites INTEGER NOT NULL
+            );
         """)
+        create_browse_indexes(self.db)
 
     def close(self):
         self.db.close()
+
+    def report_progress(self, run_id: str) -> dict:
+        row = self.db.execute(
+            """SELECT COALESCE(p.status, CASE WHEN r.report IS NULL THEN 'pending'
+                     WHEN json_extract(r.report, '$.evidence_review_version')=1 THEN 'ready' ELSE 'outdated' END) AS status,
+                      COALESCE(p.error, '') AS error, COALESCE(p.collection_status, '') AS collection_status
+               FROM runs r LEFT JOIN report_progress p ON p.run_id=r.id WHERE r.id=?""", (run_id,)
+        ).fetchone()
+        return dict(row)
+
+    def begin_report(self, run_id: str, collection_status: str, reason: str):
+        with self.db:
+            self.db.execute("UPDATE runs SET stop_reason=?, updated_at=? WHERE id=?", (reason, timestamp(), run_id))
+            self.db.execute(
+                "INSERT INTO report_progress VALUES (?, 'generating', '', ?) "
+                "ON CONFLICT(run_id) DO UPDATE SET status='generating', error='', collection_status=excluded.collection_status",
+                (run_id, collection_status),
+            )
+
+    def report_failed(self, run_id: str, error: str, *, restore_collection: bool = False):
+        with self.db:
+            self.db.execute("UPDATE report_progress SET status='failed', error=? WHERE run_id=?", (error, run_id))
+            if restore_collection:
+                self.db.execute("UPDATE runs SET status=(SELECT collection_status FROM report_progress WHERE run_id=?), "
+                                "updated_at=? WHERE id=?", (run_id, timestamp(), run_id))
+            else:
+                self.db.execute("UPDATE runs SET updated_at=? WHERE id=?", (timestamp(), run_id))
+
+    def save_report(self, run_id: str, draft: ReportDraft):
+        with self.db:
+            self.db.execute("UPDATE runs SET report=?, updated_at=? WHERE id=?", (draft.model_dump_json(), timestamp(), run_id))
+            self.db.execute("UPDATE report_progress SET status='ready', error='' WHERE run_id=?", (run_id,))
 
     def run_dir(self, run_id: str) -> Path:
         UUID(run_id)
         return self.root / "runs" / run_id
 
-    def create(self, request: ResearchRequest, catalog_version: str) -> str:
+    def create(self, request: ResearchRequest, catalog_version: str, *, scope: dict[str, int] | None = None) -> str:
         run_id = str(uuid4())
         self.run_dir(run_id).mkdir(parents=True, mode=0o700)
         now = timestamp()
@@ -84,18 +131,41 @@ class Store:
                 "INSERT INTO runs (id, request, status, created_at, updated_at, catalog_version) VALUES (?, ?, ?, ?, ?, ?)",
                 (run_id, request.model_dump_json(), RunStatus.QUEUED, now, now, catalog_version),
             )
+            if scope is not None:
+                self.db.execute("INSERT INTO scope_counts VALUES (?, ?, ?)",
+                                (run_id, scope["username_sites"], scope["email_sites"]))
         return run_id
 
-    def run(self, run_id: str) -> dict:
+    def run(self, run_id: str, *, include_report: bool = True) -> dict:
         UUID(run_id)
-        row = self.db.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
+        fields = ("*" if include_report else
+                  "id,request,status,created_at,updated_at,stop_reason,error,cancel_requested,request_count,elapsed,catalog_version")
+        row = self.db.execute(f"SELECT {fields} FROM runs WHERE id=?", (run_id,)).fetchone()
         if row is None:
             raise KeyError(f"研究任务不存在：{run_id}")
         result = dict(row)
         result["request"] = json.loads(result["request"])
-        if result["report"]:
+        if result.get("report"):
             result["report"] = json.loads(result["report"])
+        self.normalize_legacy_status(result)
         return result
+
+    def normalize_legacy_status(self, result: dict):
+        if result["status"] == RunStatus.COMPLETED and self.legacy_budget_stop(result["id"], result["stop_reason"]):
+            result["status"] = RunStatus.PARTIAL
+        if (result["status"] == RunStatus.FAILED and result["stop_reason"] == "执行错误"
+                and result["error"] == f"TimeoutError: {BudgetStop.TIME}"):
+            result.update(status=RunStatus.PARTIAL, stop_reason=BudgetStop.TIME.value, error="")
+
+    def legacy_budget_stop(self, run_id: str, reason: str) -> bool:
+        if reason not in {BudgetStop.REQUESTS, BudgetStop.PLANNING, "网络请求预算已耗尽"}:
+            return False
+        # 老版本仅保存停止文案；模型主动结束时有对应的决策记录。
+        model_stop = self.db.execute(
+            "SELECT 1 FROM decisions WHERE run_id=? AND COALESCE(json_extract(payload,'$.source'),'model')='model' "
+            "AND json_extract(payload,'$.stop_reason')=? LIMIT 1", (run_id, reason),
+        ).fetchone()
+        return model_stop is None
 
     def update(self, run_id: str, **fields):
         allowed = {"status", "stop_reason", "error", "cancel_requested", "elapsed", "report", "request"}
@@ -126,11 +196,11 @@ class Store:
             "SELECT status, count(*) FROM actions WHERE run_id=? GROUP BY status", (run_id,)
         ))
 
-    def failed_queries(self, run_id: str) -> list[dict]:
-        return [{**dict(row), "payload": json.loads(row["payload"])} for row in self.db.execute(
-            "SELECT * FROM actions WHERE run_id=? AND status IN ('unreachable', 'blocked') ORDER BY rowid",
-            (run_id,),
-        )]
+    def failed_queries(self, run_id: str, limit: int | None = None) -> list[dict]:
+        query = "SELECT * FROM actions WHERE run_id=? AND status IN ('unreachable','blocked') ORDER BY rowid"
+        rows = (self.db.execute(query, (run_id,)) if limit is None else
+                reversed(self.db.execute(query + " DESC LIMIT ?", (run_id, limit)).fetchall()))
+        return [{**dict(row), "payload": json.loads(row["payload"])} for row in rows]
 
     def coverage(self, run_id: str) -> dict:
         counts = dict(self.db.execute(
@@ -150,7 +220,7 @@ class Store:
             self.db.execute("UPDATE actions SET status=?, error=? WHERE run_id=? AND id=?",
                             (status, error, run_id, action_id))
 
-    def reset_incomplete(self, run_id: str):
+    def reset_incomplete(self, run_id: str, *, new_request: ResearchRequest | None = None):
         with self.db:
             self.db.execute(
                 "UPDATE actions SET status='pending', error='' WHERE run_id=? AND status NOT IN ('completed', 'unreachable', 'blocked')",
@@ -160,6 +230,23 @@ class Store:
                 "UPDATE model_calls SET status='interrupted', finished_at=? WHERE run_id=? AND status='running'",
                 (timestamp(), run_id),
             )
+            if new_request is not None:
+                # 每次追加从新的检查点继续读取同一任务保存的查询、证据和已完成请求。
+                self.db.execute(
+                    "INSERT INTO budget_extensions SELECT ?, coalesce(max(revision)+1,1), "
+                    "(SELECT coalesce(max(round)+1,0) FROM decisions WHERE run_id=?), ?, ? "
+                    "FROM budget_extensions WHERE run_id=?",
+                    (run_id, run_id, new_request.budget.model_dump_json(), timestamp(), run_id),
+                )
+                self.db.execute(
+                    "INSERT INTO report_progress SELECT id, CASE WHEN report IS NULL THEN 'pending' ELSE 'outdated' END, '', '' "
+                    "FROM runs WHERE id=? ON CONFLICT(run_id) DO UPDATE SET status=excluded.status, error='', collection_status=''",
+                    (run_id,),
+                )
+                self.db.execute(
+                    "UPDATE runs SET request=?, status=?, stop_reason='', error='', cancel_requested=0, updated_at=? WHERE id=?",
+                    (new_request.model_dump_json(), RunStatus.QUEUED, timestamp(), run_id),
+                )
 
     def uncertain_requests(self, run_id: str) -> list[str]:
         return [row[0] for row in self.db.execute(

@@ -14,7 +14,6 @@ from kudo_agent.research_core.models import (
     ActionPlan,
     Identifier,
     Model,
-    ReportDraft,
     ResearchDecision,
 )
 
@@ -27,6 +26,10 @@ class ExtractedInput(Model):
 
 class HealthResult(Model):
     ready: bool
+
+
+class ReportSelection(Model):
+    observation_ids: list[str] = Field(min_length=1, max_length=8)
 
 
 class DeepSeekToolSchema(GenerateJsonSchema):
@@ -145,12 +148,11 @@ class Planner:
         )
         return ActionPlan(**result.model_dump())
 
-    async def report(self, context: dict) -> ReportDraft:
+    async def report(self, context: dict) -> ReportSelection:
         return await self.structured(
-            ReportDraft, context,
-            "返回 claims 和 next_actions。claims 每项仅包含 text、evidence_ids、conflicting_evidence_ids。"
-            "text 填写事实陈述，每条完整引用 evidence_ids；冲突证据填入 conflicting_evidence_ids，无冲突填写空数组。"
-            "建议单列 next_actions 字符串数组。",
+            ReportSelection, context,
+            "从 observations 选择与用户问题最相关的一至八项核查结果，按相关性排列。"
+            "observation_ids 只能使用给出的完整 ID，每个 ID 只能出现一次。",
             purpose="report",
         )
 

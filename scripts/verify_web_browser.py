@@ -4,9 +4,156 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 from playwright.async_api import async_playwright, expect
+
+
+async def verify_scope_picker(page):
+    clues = page.get_by_label("已知线索", exact=True)
+    submit = page.get_by_role("button", name="开始研究", exact=True)
+    scope = page.locator("#default-scope")
+    await clues.fill("sherlock-project\nsupport@github.com")
+    all_sites = page.get_by_label("全部站点", exact=True)
+    await expect(all_sites).to_be_visible()
+    if await all_sites.is_checked():
+        await all_sites.uncheck()
+    await expect(scope).to_contain_text("请选择站点类别")
+    await expect(submit).to_be_disabled()
+    await clues.fill("sherlock-project")
+    goal = page.get_by_label("研究问题（选填）", exact=True)
+    await goal.fill("只核查这个项目的 GitHub 主页")
+    await expect(scope).to_contain_text("用户名检查 GitHub")
+    await expect(all_sites).not_to_be_checked()
+    await expect(page.get_by_label("仅查询指定用户名站点", exact=True)).not_to_be_checked()
+    await goal.fill("只核查这个项目的 Gitee 主页")
+    await expect(scope).to_contain_text("用户名检查 Gitee")
+    technology = page.locator('.category-option input[value="technology"]')
+    await technology.check()
+    await goal.fill("只查 GitHub 和 Gitee")
+    await expect(scope).to_contain_text("用户名检查 GitHub、Gitee（2 个站点）")
+    await goal.fill("只查 GitHub 和 GitHuub")
+    await expect(page.locator("#form-error")).to_contain_text("GitHuub")
+    await expect(submit).to_be_disabled()
+    await goal.fill("只查 GitHub 和 Gitee")
+    await expect(scope).to_contain_text("GitHub、Gitee（2 个站点）")
+    await technology.uncheck()
+    await goal.fill("")
+    await expect(submit).to_be_disabled()
+    await expect(scope).to_contain_text("请选择站点类别")
+    await clues.fill("sherlock-project\nsupport@github.com")
+    await expect(page.locator(".clue-chip")).to_have_count(2)
+    catalog = await (await page.request.get(urljoin(page.url, "/api/capabilities?limit=1"))).json()
+    choices = [item for item in catalog["site_categories"] if item["username_count"] and item["email_count"]][:2]
+    assert len(choices) == 2
+    for index, item in enumerate(choices, 1):
+        selected = choices[:index]
+        keys = [category["id"] for category in selected]
+        async with page.expect_response(lambda response: urlsplit(response.url).path == "/api/prepare"
+                                        and response.request.post_data_json.get("site_categories") == keys) as result:
+            await page.get_by_label(item["label"], exact=True).check()
+        prepared = await (await result.value).json()
+        assert prepared["request"]["site_categories"] == keys
+        totals = {kind: sum(category[field] for category in selected)
+                  for kind, field in (("username_sites", "username_count"), ("email_sites", "email_count"))}
+        assert prepared["scope"] == totals
+        await expect(scope).to_contain_text(f"用户名检查 {totals['username_sites']:,} 个站点")
+        await expect(scope).to_contain_text(f"邮箱检查 {totals['email_sites']} 个站点")
+    await page.get_by_role("link", name="站点目录", exact=True).click()
+    await page.get_by_role("link", name="研究", exact=True).click()
+    for item in choices:
+        await expect(page.get_by_label(item["label"], exact=True)).to_be_checked()
+    await all_sites.check()
+    await expect(scope).to_contain_text("邮箱检查 100 个站点")
+    await page.get_by_text("按名称选择站点", exact=True).click()
+    username = page.get_by_label("仅查询指定用户名站点", exact=True)
+    email = page.get_by_label("仅查询指定邮箱站点", exact=True)
+    await username.check()
+    await expect(submit).to_be_disabled()
+    search = page.get_by_role("searchbox", name="搜索用户名站点", exact=True)
+    for name in ("GitHub", "Gitee", "GitHub"):
+        await search.fill(name)
+        await page.get_by_role("button", name=name, exact=True).click()
+    await expect(scope).to_contain_text("用户名检查 GitHub、Gitee")
+    await expect(page.get_by_role("button", name="移除 GitHub", exact=True)).to_have_count(1)
+    await goal.fill("只核查这个项目的 GitHub 主页")
+    await expect(scope).to_contain_text("用户名检查 GitHub，")
+    await expect(page.get_by_role("button", name="移除 Gitee", exact=True)).to_be_visible()
+    await goal.fill("")
+    await expect(scope).to_contain_text("用户名检查 GitHub、Gitee")
+    await email.check()
+    await expect(submit).to_be_disabled()
+    await page.get_by_role("searchbox", name="搜索邮箱站点", exact=True).fill("Gravatar")
+    async with page.expect_response(lambda response: urlsplit(response.url).path == "/api/prepare"
+                                    and response.request.post_data_json.get("email_sites") == ["gravatar"]) as result:
+        await page.get_by_role("button", name="Gravatar", exact=True).click()
+    prepared = await (await result.value).json()
+    assert [site["name"] for site in prepared["username_sites"]] == ["GitHub", "Gitee"]
+    assert prepared["request"]["sites"] == [site["id"] for site in prepared["username_sites"]]
+    assert prepared["request"]["email_sites"] == ["gravatar"]
+    await expect(scope).to_contain_text("邮箱检查 Gravatar")
+    await page.locator('.category-option input[value="technology"]').check()
+    await expect(scope).to_contain_text("用户名检查 GitHub、Gitee")
+    await expect(scope).to_contain_text("邮箱检查 0 个站点")
+    async with page.expect_response(lambda response: urlsplit(response.url).path == "/api/capabilities"
+                                    and parse_qs(urlsplit(response.url).query).get("query") == ["GitHub"]) as found:
+        await search.fill("GitHub")
+    response = await found.value
+    assert response.ok, await response.text()
+    assert parse_qs(urlsplit(response.url).query)["categories"] == ["technology"]
+    matches = (await response.json())["sites"]
+    assert matches and all(item["category"] == "technology" for item in matches)
+    await search.fill("")
+    await page.locator('.category-option input[value="media"]').check()
+    await page.locator('.category-option input[value="technology"]').uncheck()
+    await expect(page.locator("#form-error")).to_contain_text("范围")
+    await expect(submit).to_be_disabled()
+    await page.get_by_label("全部类别", exact=True).check()
+    await expect(scope).to_contain_text("邮箱检查 Gravatar")
+    await search.fill("urn:kudoagent:no-matching-site")
+    await expect(page.get_by_text("没有匹配的站点。", exact=True)).to_be_visible()
+    await expect(submit).to_be_disabled()
+    await search.fill("")
+    await expect(scope).to_contain_text("用户名检查 GitHub、Gitee")
+    await page.get_by_role("button", name="移除 GitHub", exact=True).click()
+    await page.get_by_role("button", name="移除 Gitee", exact=True).click()
+    await expect(submit).to_be_disabled()
+    await search.fill("YouTube")
+    alternatives = page.get_by_role("button", name=re.compile("^YouTube · "))
+    await expect(alternatives).to_have_count(2)
+    first, second = await alternatives.all_text_contents()
+    await page.get_by_role("button", name=first, exact=True).click()
+    await search.fill("YouTube")
+    await page.get_by_role("button", name=second, exact=True).click()
+    await expect(scope).to_contain_text(first)
+    await expect(scope).to_contain_text(second)
+    await username.uncheck()
+    await email.uncheck()
+    await expect(scope).to_contain_text("邮箱检查 100 个站点")
+    await clues.fill("https://github.com/sherlock-project")
+    await expect(scope).to_have_text("初始范围：读取所填主页")
+    await expect(page.get_by_text("按名称选择站点", exact=True)).to_be_hidden()
+    follow = page.get_by_label("继续核查页面外链", exact=True)
+    await expect(follow).not_to_be_checked()
+    await follow.check()
+    await expect(scope).to_contain_text("核查页面外链最多")
+    await page.get_by_role("link", name="站点目录", exact=True).click()
+    await page.get_by_role("link", name="研究", exact=True).click()
+    await expect(follow).to_be_checked()
+    await expect(all_sites).to_be_checked()
+    await expect(page.locator(".category-option input[value]:checked")).to_have_count(0)
+    await all_sites.uncheck()
+    await expect(scope).to_contain_text("请选择站点类别")
+    await expect(submit).to_be_disabled()
+    async with page.expect_response(lambda response: urlsplit(response.url).path == "/api/prepare"
+                                    and response.request.post_data_json.get("site_categories") == ["technology"]) as response:
+        await page.locator('.category-option input[value="technology"]').check()
+    selected = await (await response.value).json()
+    assert selected["request"]["follow_profile_links"] is True
+    await expect(scope).to_contain_text(f"限 {selected['scope']['username_sites']:,} 个站点")
+    await follow.uncheck()
+    await expect(scope).to_have_text("初始范围：读取所填主页")
+    await expect(page.get_by_text("按名称选择站点", exact=True)).to_be_hidden()
 
 
 async def main():
@@ -33,13 +180,8 @@ async def main():
                 assert await page.evaluate("document.documentElement.scrollWidth <= window.innerWidth"), width
                 assert await page.locator("dialog, canvas").count() == 0
 
-        async def open_options():
-            options = page.locator(".research-options")
-            if not await options.evaluate("node => node.open"):
-                await options.locator(":scope > summary").click()
-
         await page.goto(args.url)
-        await expect(page.get_by_role("heading", name="从已知线索开始", exact=True)).to_be_visible()
+        await expect(page.get_by_role("heading", name="新建研究", exact=True)).to_be_visible()
         initial_url = page.url
         await page.get_by_role("link", name="跳转到主要内容", exact=True).focus()
         await page.keyboard.press("Enter")
@@ -52,10 +194,11 @@ async def main():
         initial_total = (await initial_runs.json())["total"]
         clues = page.get_by_label("已知线索", exact=True)
         await expect(clues).to_be_visible()
-        await expect(page.locator("#default-scope")).to_contain_text(f"{catalog['supported_sites']:,}")
+        await expect(page.locator("#default-scope")).to_be_hidden()
         assert await page.locator("#site-search, #email-options, [name=max_sites]").count() == 0
         assert await page.get_by_role("combobox", name="线索类型").count() == 0
-        await expect(page.get_by_label("希望核查的问题", exact=True)).not_to_be_visible()
+        goal_field = page.get_by_label("研究问题（选填）", exact=True)
+        await expect(goal_field).to_be_visible()
         async with page.expect_response(lambda response: urlsplit(response.url).path == "/api/prepare") as prepared_response:
             await clues.fill("sherlock-project\n\nhttps://github.com/sherlock-project\nsherlock-project")
         prepared = await (await prepared_response.value).json()
@@ -65,14 +208,18 @@ async def main():
         assert prepared["request"]["budget"]["max_sites"] is None
         assert "sherlock-project" in prepared["request"]["goal"]
         await expect(page.locator(".clue-chip")).to_have_count(2)
+        await expect(page.locator("#submit-research")).to_be_disabled()
+        await page.get_by_label("全部站点", exact=True).check()
+        await expect(page.locator("#default-scope")).to_contain_text(f"{catalog['supported_sites']:,}")
         await clues.focus()
         await page.keyboard.press("Tab")
-        await expect(page.get_by_role("button", name="填写公开项目示例", exact=True)).to_be_focused()
+        await expect(goal_field).to_be_focused()
         await page.keyboard.press("Tab")
-        await expect(page.locator(".research-options > summary")).to_be_focused()
+        await expect(page.locator(".category-option input:visible").first).to_be_focused()
+        await page.locator(".research-options > summary").focus()
         await page.keyboard.press("Enter")
-        await expect(page.get_by_label("希望核查的问题", exact=True)).to_be_visible()
-        await expect(page.get_by_label("希望核查的问题", exact=True)).to_have_value("")
+        await expect(page.locator('[name="max_requests"]')).to_be_visible()
+        await expect(goal_field).to_have_value("")
         async with page.expect_response(lambda response: urlsplit(response.url).path == "/api/prepare") as invalid_response:
             await clues.fill("sherlock-project\n\nhttps:/github.com/sherlock-project")
         invalid = await invalid_response.value
@@ -81,16 +228,16 @@ async def main():
         await expect(page.locator("#form-error")).to_be_visible()
         await expect(page.locator("#form-error")).to_contain_text("第 3 行线索")
         await expect(page.locator(".clue-chip")).to_have_count(0)
-        async with page.expect_response(lambda response: urlsplit(response.url).path == "/api/prepare"):
-            await page.get_by_role("button", name="开始研究", exact=True).click()
-        await expect(page.get_by_role("heading", name="从已知线索开始", exact=True)).to_be_visible()
+        await expect(page.get_by_role("button", name="开始研究", exact=True)).to_be_disabled()
+        await expect(page.get_by_role("heading", name="新建研究", exact=True)).to_be_visible()
         assert not research_posts
         current_runs = await context.request.get(f"{args.url}/api/research?limit=1")
         assert (await current_runs.json())["total"] == initial_total
-        await page.get_by_role("button", name="填写公开项目示例", exact=True).click()
-        await expect(clues).to_be_focused()
+        await clues.fill("https://github.com/sherlock-project")
         await expect(page.locator(".clue-chip")).to_have_count(1)
+        await expect(page.locator("#default-scope")).to_have_text("初始范围：读取所填主页")
         await expect(page.locator("#form-error")).not_to_be_visible()
+        await verify_scope_picker(page)
         await check_layout()
         await page.set_viewport_size({"width": 1440, "height": 1000})
         print("首页多行解析、去重、逐行校验、默认范围与键盘操作通过", flush=True)
@@ -123,15 +270,12 @@ async def main():
 
         async def create_research(goal=""):
             await page.get_by_role("link", name="研究", exact=True).click()
-            await expect(page.get_by_role("heading", name="从已知线索开始", exact=True)).to_be_visible()
+            await expect(page.get_by_role("heading", name="新建研究", exact=True)).to_be_visible()
             await page.get_by_label("已知线索", exact=True).fill("https://github.com/sherlock-project")
-            await open_options()
-            await page.get_by_label("希望核查的问题", exact=True).fill(goal)
+            await goal_field.fill(goal)
             await page.get_by_text("请求与时间预算", exact=True).click()
-            await page.locator('[name="max_depth"]').fill("0")
             await page.locator('[name="max_rounds"]').fill("4")
             await page.locator('[name="run_timeout"]').fill("300")
-            await page.get_by_label("已知线索", exact=True).fill("https://github.com/sherlock-project")
             await page.get_by_role("button", name="开始研究", exact=False).click()
             await page.wait_for_url("**/#/research/*/evidence", timeout=20_000)
             await expect(page.get_by_role("link", name="发现资料", exact=True)).to_have_attribute("aria-current", "page")
@@ -231,7 +375,7 @@ async def main():
         await expect(page.get_by_role("heading", name="保持一致", exact=True)).to_be_visible()
         await check_layout()
         await page.get_by_role("link", name="研究", exact=True).click()
-        await expect(page.get_by_role("heading", name="从已知线索开始", exact=True)).to_be_visible()
+        await expect(page.get_by_role("heading", name="新建研究", exact=True)).to_be_visible()
         await expect(page.locator(f'.task-title[href="#/research/{second}/evidence"]')).to_be_visible()
         await check_layout()
         assert len(research_posts) == 2

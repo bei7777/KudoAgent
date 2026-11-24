@@ -3,7 +3,7 @@ from typing import Annotated
 import phonenumbers
 from pydantic import BeforeValidator, Field, HttpUrl, TypeAdapter, field_validator
 
-from kudo_agent.research_core.models import Budget, Identifier, Model, ResearchRequest
+from kudo_agent.research_core.models import Identifier, ResearchRequest, ResearchScope
 
 PROFILE_URL = TypeAdapter(HttpUrl)
 
@@ -48,10 +48,9 @@ def identify_clue(value: str) -> Identifier:
 Clue = Annotated[Identifier, BeforeValidator(identify_clue)]
 
 
-class ResearchIntake(Model):
+class ResearchIntake(ResearchScope):
     clues: dict[int, Clue] = Field(min_length=1)
     goal: str = Field(default="", max_length=8000)
-    budget: Budget = Field(default_factory=Budget)
 
     @field_validator("clues", mode="before", json_schema_input_type=str)
     @classmethod
@@ -100,9 +99,11 @@ class ResearchIntake(Model):
             f"整理 {subject} 对应的公开资料：" + "；".join(tasks[kind] for kind in kinds)
             + "。逐项引用来源并说明查询限制；同名仅作为候选关联。"
         )
-        request = ResearchRequest(goal=goal, identifiers=identifiers, budget=self.budget)
+        request = ResearchRequest(goal=goal, identifiers=identifiers,
+                                  **self.model_dump(exclude={"goal", "clues"}, exclude_unset=True))
         return {
             "request": request.model_dump(),
+            "requires_model": request.requires_model,
             "identifiers": [identifier.model_dump() for identifier in identifiers],
             "lines": [{"line": number, **identifier.model_dump()} for number, identifier in self.clues.items()],
         }

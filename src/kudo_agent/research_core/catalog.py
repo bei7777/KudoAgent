@@ -6,6 +6,11 @@ from urllib.parse import quote, urlsplit
 
 from kudo_agent import __version__
 from kudo_agent.research_core.models import RequestSpec, digest
+from kudo_agent.research_core.site_categories import (
+    SiteCategory,
+    checked_categories,
+    username_category,
+)
 from kudo_agent.upstream import maigret, sherlock
 
 DOMESTIC_PRIORITY = {name: position for position, name in enumerate((
@@ -71,6 +76,7 @@ class Site:
     rank: int
     rules: list[Rule] = field(default_factory=list)
     aliases: list[str] = field(default_factory=list)
+    category: SiteCategory = "other"
 
     @property
     def region(self):
@@ -100,7 +106,7 @@ class Site:
         return {
             "site_id": self.site_id, "name": self.name, "profile_template": self.template,
             "supported": self.supported,
-            "aliases": self.aliases, "region": self.region,
+            "aliases": self.aliases, "region": self.region, "category": self.category,
             "input_types": sorted({rule.data.get("type", "username") for rule in self.rules}),
             "input_hint": self.input_hint,
             "rules": [{"rule_id": r.rule_id, "unsupported": r.unsupported} for r in self.rules],
@@ -160,25 +166,32 @@ class Catalog:
             site.rank = min(site.rank, rank)
             site.rules.append(rule)
         self.sites = {site.site_id: site for site in groups.values()}
+        self._sites_by_name: dict[str, dict[str, Site]] = {}
         aliases = json.loads(files("kudo_agent.research_core").joinpath("data/site-aliases.json").read_text(encoding="utf-8"))
-        for site in self.sites.values():
+        for (host, *_), site in groups.items():
             site.aliases = sorted({alias for rule in site.rules for alias in aliases.get(rule.name, [])})
+            tags = {tag for rule in site.rules for tag in rule.data.get("tags", [])}
+            site.category = username_category(host, tags)
+            for rule in site.rules:
+                self._sites_by_name.setdefault(rule.name.casefold(), {})[site.site_id] = site
+        self._supported_sites = sorted((s for s in self.sites.values() if s.supported), key=lambda s: s.sort_key)
         self.version = digest([__version__, maigret.COMMIT, sherlock.COMMIT, database, sherlock_data])
 
     def select(self, names: list[str], maximum: int | None = None) -> list[Site]:
         if not names:
-            return sorted(
-                (s for s in self.sites.values() if s.supported), key=lambda s: s.sort_key
-            )[:maximum]
+            return self._supported_sites[:maximum]
         selected = {}
         for name in names:
-            matches = [
-                site for site in self.sites.values()
-                if site.site_id == name or any(r.name.casefold() == name.casefold() for r in site.rules)
-            ]
+            matches = self._sites_by_name.get(name.casefold(), {}).copy()
+            if name in self.sites:
+                matches[name] = self.sites[name]
             if len(matches) != 1:
                 raise ValueError(f"站点名称无法唯一识别：{name}；请使用 sites 列出的 site_id")
-            selected[matches[0].site_id] = matches[0]
+            selected.update(matches)
         if maximum is not None and len(selected) > maximum:
             raise ValueError("指定站点数量超过 max_sites")
         return list(selected.values())
+
+    def select_categories(self, categories: list[SiteCategory], maximum: int | None = None) -> list[Site]:
+        selected = checked_categories(categories)
+        return [site for site in self._supported_sites if site.category in selected][:maximum]

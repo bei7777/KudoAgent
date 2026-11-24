@@ -108,6 +108,27 @@ def test_recorded_pages_share_one_page_without_losing_evidence(collected_app):
     assert ordered[-1]["kind"] == "ip"
 
 
+def test_archived_report_and_pagination_without_raw_bodies(collected_app):
+    app = collected_app
+    run_id = app.store.db.execute("SELECT run_id FROM artifacts LIMIT 1").fetchone()[0]
+    statements = []
+    app.store.db.set_trace_callback(statements.append)
+    try:
+        brief = app.get_research(run_id, include_timeline=False)
+        report = app.report_summary(run_id)
+        assert report["status"]["evidence_count"] == brief["evidence_count"] > 0
+        assert "timeline" not in brief and "model_usage" not in report["status"]
+        page = app.get_evidence(run_id, limit=1)
+        assert len(page["items"]) == 1
+        assert any("LIMIT 1 OFFSET 0" in statement for statement in statements)
+        assert not any(statement.startswith("SELECT payload FROM artifacts WHERE run_id=")
+                       and "id IN" not in statement for statement in statements)
+    finally:
+        app.store.db.set_trace_callback(None)
+    with pytest.raises(FileNotFoundError):
+        app.get_report(run_id, "json")
+
+
 def test_recorded_conflicts_keep_rules_and_global_counts(researched_app):
     app = researched_app
     row = app.store.db.execute(

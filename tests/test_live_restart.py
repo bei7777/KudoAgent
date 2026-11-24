@@ -73,7 +73,7 @@ async def test_killed_process_resumes(phase, tmp_path):
                     resumed.kill()
                     await resumed.wait()
         status = observer.get_status(run_id)
-        assert status["status"] == "completed"
+        assert status["status"] == ("partial" if phase == "planning" else "completed")
         assert status["elapsed"] >= interrupted["elapsed"]
         if phase != "planning":
             assert status["model_usage"]["total_tokens"] > 0
