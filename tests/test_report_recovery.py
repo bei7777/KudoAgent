@@ -115,7 +115,8 @@ async def test_report_file_error_preserves_completed_collection_and_web_can_retr
         destination.mkdir()
         finished = await app.wait(run_id)
         assert finished["status"] == "completed" and finished["report_status"] == "failed"
-        assert "IsADirectoryError" in finished["report_error"] and finished["can_retry_report"]
+        assert finished["report_error"].startswith(("IsADirectoryError:", "PermissionError:"))
+        assert destination.name in finished["report_error"] and finished["can_retry_report"]
         assert finished["coverage"]["checked"] == 1
         destination.rmdir()
     with TestClient(create_web_app(settings), base_url="http://127.0.0.1") as client:
